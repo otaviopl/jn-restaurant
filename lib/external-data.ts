@@ -12,36 +12,10 @@ const API_KEY = process.env.EXTERNAL_API_KEY;
 // Default cache time: 5 minutes
 const DEFAULT_REVALIDATE = 300;
 
-// Mapping from external API flavor names to internal flavor names
-const FLAVOR_MAPPING: Record<string, SkewerFlavor> = {
-  'Carne': 'Carne',
-  'Frango': 'Frango', 
-  'Queijo': 'Queijo',
-  'Calabresa': 'Calabresa',
-  'Misto': 'Carne', // Map Misto to Carne as default
-  'Coração': 'Frango', // Map Coração to Frango as default
-  // Add more mappings as needed
-};
-
-// Function to map external flavor names to internal ones
-function mapExternalFlavor(externalFlavor: string): SkewerFlavor | null {
-  const mapped = FLAVOR_MAPPING[externalFlavor];
-  if (mapped) {
-    return mapped;
-  }
-  
-  // Try case-insensitive matching
-  const lowerExternal = externalFlavor.toLowerCase();
-  const validFlavors: SkewerFlavor[] = ['Carne', 'Frango', 'Queijo', 'Calabresa'];
-  
-  for (const flavor of validFlavors) {
-    if (flavor.toLowerCase() === lowerExternal) {
-      return flavor;
-    }
-  }
-  
-  console.warn(`Unknown flavor from external API: ${externalFlavor}`);
-  return null;
+// Function to normalize external flavor names to consistent format
+function normalizeFlavorName(externalFlavor: string): SkewerFlavor {
+  // Simply use the external flavor name as-is, just normalize whitespace
+  return externalFlavor.trim();
 }
 
 interface ExternalInventoryItem {
@@ -102,13 +76,8 @@ export async function fetchExternalInventory(): Promise<InventoryItem[] | null> 
       return null;
     }
     
-    // Initialize inventory with default flavors  
-    const inventoryMap = new Map<SkewerFlavor, { quantity: number; initialQuantity: number }>([
-      ['Carne', { quantity: 0, initialQuantity: 0 }],
-      ['Frango', { quantity: 0, initialQuantity: 0 }], 
-      ['Queijo', { quantity: 0, initialQuantity: 0 }],
-      ['Calabresa', { quantity: 0, initialQuantity: 0 }]
-    ]);
+    // Initialize inventory map to accumulate data
+    const inventoryMap = new Map<SkewerFlavor, { quantity: number; initialQuantity: number }>();
 
     // Process each item from external API
     for (const item of data) {
@@ -117,18 +86,16 @@ export async function fetchExternalInventory(): Promise<InventoryItem[] | null> 
         continue;
       }
 
-      const mappedFlavor = mapExternalFlavor(item.Espetinhos);
-      if (mappedFlavor) {
-        const current = inventoryMap.get(mappedFlavor) || { quantity: 0, initialQuantity: 0 };
-        
-        // Sum quantities if multiple external items map to same internal flavor
-        inventoryMap.set(mappedFlavor, {
-          quantity: current.quantity + Math.max(0, item.Estoque),
-          initialQuantity: current.initialQuantity + Math.max(0, item["Quantidade Inicial"] || 0)
-        });
-        
-        console.log(`Mapped external flavor '${item.Espetinhos}' -> '${mappedFlavor}': ${item.Estoque} current, ${item["Quantidade Inicial"]} initial`);
-      }
+      const normalizedFlavor = normalizeFlavorName(item.Espetinhos);
+      const current = inventoryMap.get(normalizedFlavor) || { quantity: 0, initialQuantity: 0 };
+      
+      // Sum quantities if duplicate flavors exist
+      inventoryMap.set(normalizedFlavor, {
+        quantity: current.quantity + Math.max(0, item.Estoque),
+        initialQuantity: current.initialQuantity + Math.max(0, item["Quantidade Inicial"] || 0)
+      });
+      
+      console.log(`Processed flavor '${normalizedFlavor}': ${item.Estoque} current, ${item["Quantidade Inicial"]} initial`);
     }
 
     // Convert map to InventoryItem array
@@ -185,19 +152,17 @@ export async function fetchExternalProducts(): Promise<{ flavors: SkewerFlavor[]
 
     const data: ExternalProductsResponse = await response.json();
     
-    // Filter and validate products
-    const validFlavors: SkewerFlavor[] = ['Carne', 'Frango', 'Queijo', 'Calabresa'];
-    const validBeverages: Beverage[] = ['Coca-Cola', 'Guaraná', 'Água', 'Suco'];
-
+    // Use products as-is from external API, with minimal validation
     const flavors = data.skewerFlavors
-      .filter(f => validFlavors.includes(f as SkewerFlavor)) as SkewerFlavor[];
+      .filter(f => f && typeof f === 'string')
+      .map(f => normalizeFlavorName(f));
     
     const beverages = data.beverages
-      .filter(b => validBeverages.includes(b as Beverage)) as Beverage[];
+      .filter(b => b && typeof b === 'string') as Beverage[];
 
     const result = {
-      flavors: flavors.length > 0 ? flavors : validFlavors,
-      beverages: beverages.length > 0 ? beverages : validBeverages
+      flavors: flavors.length > 0 ? flavors : ['Carne', 'Frango', 'Queijo', 'Calabresa'], // fallback
+      beverages: beverages.length > 0 ? beverages : ['Coca-Cola', 'Guaraná', 'Água', 'Suco'] // fallback
     };
 
     console.log('External products fetched successfully:', result);
@@ -260,13 +225,8 @@ export async function fetchExternalInventoryRealtime(): Promise<InventoryItem[] 
       return null;
     }
     
-    // Initialize inventory with default flavors
-    const inventoryMap = new Map<SkewerFlavor, number>([
-      ['Carne', 0],
-      ['Frango', 0], 
-      ['Queijo', 0],
-      ['Calabresa', 0]
-    ]);
+    // Initialize inventory map
+    const inventoryMap = new Map<SkewerFlavor, number>();
 
     // Process each item from external API
     for (const item of data) {
@@ -274,11 +234,9 @@ export async function fetchExternalInventoryRealtime(): Promise<InventoryItem[] 
         continue;
       }
 
-      const mappedFlavor = mapExternalFlavor(item.Espetinhos);
-      if (mappedFlavor) {
-        const currentQty = inventoryMap.get(mappedFlavor) || 0;
-        inventoryMap.set(mappedFlavor, currentQty + Math.max(0, item.Estoque));
-      }
+      const normalizedFlavor = normalizeFlavorName(item.Espetinhos);
+      const currentQty = inventoryMap.get(normalizedFlavor) || 0;
+      inventoryMap.set(normalizedFlavor, currentQty + Math.max(0, item.Estoque));
     }
 
     return Array.from(inventoryMap.entries()).map(([flavor, quantity]) => ({
@@ -328,23 +286,15 @@ async function deriveProductsFromInventory(): Promise<{ flavors: SkewerFlavor[];
     }
 
     // Extract unique flavors from inventory
-    const externalFlavors = new Set<string>();
+    const flavorsSet = new Set<SkewerFlavor>();
     for (const item of data) {
       if (item.Espetinhos) {
-        externalFlavors.add(item.Espetinhos);
+        const normalizedFlavor = normalizeFlavorName(item.Espetinhos);
+        flavorsSet.add(normalizedFlavor);
       }
     }
 
-    // Map to internal flavors
-    const mappedFlavors = new Set<SkewerFlavor>();
-    for (const externalFlavor of externalFlavors) {
-      const mapped = mapExternalFlavor(externalFlavor);
-      if (mapped) {
-        mappedFlavors.add(mapped);
-      }
-    }
-
-    const flavors = Array.from(mappedFlavors);
+    const flavors = Array.from(flavorsSet);
     const beverages: Beverage[] = ['Coca-Cola', 'Guaraná', 'Água', 'Suco']; // Default beverages
 
     console.log('Derived products from inventory:', { flavors, beverages });

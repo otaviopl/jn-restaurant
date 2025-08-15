@@ -40,8 +40,8 @@ export default function HomePage() {
   const [orderItems, setOrderItems] = useState<NewOrderItem[]>([]);
 
   // Dynamic products from external APIs
-  const [flavors, setFlavors] = useState<SkewerFlavor[]>(['Carne', 'Frango', 'Queijo', 'Calabresa']);
-  const [beverages, setBeverages] = useState<Beverage[]>(['Coca-Cola', 'Guaraná', 'Água', 'Suco']);
+  const [flavors, setFlavors] = useState<SkewerFlavor[]>([]);
+  const [beverages, setBeverages] = useState<Beverage[]>([]);
   const [lastSync, setLastSync] = useState<Date | null>(null);
   const [dataSource, setDataSource] = useState<'local' | 'external'>('local');
 
@@ -70,10 +70,14 @@ export default function HomePage() {
 
       if (productsRes.ok) {
         const productsData = await productsRes.json();
-        setFlavors(productsData.flavors || ['Carne', 'Frango', 'Queijo', 'Calabresa']);
-        setBeverages(productsData.beverages || ['Coca-Cola', 'Guaraná', 'Água', 'Suco']);
+        setFlavors(productsData.flavors && productsData.flavors.length > 0 ? productsData.flavors : ['Carne', 'Frango', 'Queijo', 'Calabresa']);
+        setBeverages(productsData.beverages && productsData.beverages.length > 0 ? productsData.beverages : ['Coca-Cola', 'Guaraná', 'Água', 'Suco']);
         setLastSync(productsData.lastSyncFormatted ? new Date(productsData.lastSyncFormatted) : null);
         setDataSource(productsData.dataSource || 'local');
+      } else {
+        // Fallback products if API fails
+        setFlavors(['Carne', 'Frango', 'Queijo', 'Calabresa']);
+        setBeverages(['Coca-Cola', 'Guaraná', 'Água', 'Suco']);
       }
     } catch (err) {
       setError('Erro ao carregar dados');
@@ -83,11 +87,13 @@ export default function HomePage() {
   };
 
   const addSkewerItem = () => {
-    setOrderItems([...orderItems, { type: 'skewer', flavor: 'Carne', qty: 1 }]);
+    const defaultFlavor = flavors.length > 0 ? flavors[0] : 'Carne';
+    setOrderItems([...orderItems, { type: 'skewer', flavor: defaultFlavor, qty: 1 }]);
   };
 
   const addBeverageItem = () => {
-    setOrderItems([...orderItems, { type: 'beverage', beverage: 'Coca-Cola', qty: 1 }]);
+    const defaultBeverage = beverages.length > 0 ? beverages[0] : 'Coca-Cola';
+    setOrderItems([...orderItems, { type: 'beverage', beverage: defaultBeverage, qty: 1 }]);
   };
 
   const removeItem = (index: number) => {
@@ -257,8 +263,8 @@ export default function HomePage() {
                             value={item.type}
                             onChange={(e) => updateItem(index, { 
                               type: e.target.value as 'skewer' | 'beverage',
-                              flavor: e.target.value === 'skewer' ? 'Carne' : undefined,
-                              beverage: e.target.value === 'beverage' ? 'Coca-Cola' : undefined
+                              flavor: e.target.value === 'skewer' ? (flavors.length > 0 ? flavors[0] : 'Carne') : undefined,
+                              beverage: e.target.value === 'beverage' ? (beverages.length > 0 ? beverages[0] : 'Coca-Cola') : undefined
                             })}
                           >
                             <option value="skewer">Espetinho</option>

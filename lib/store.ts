@@ -1,6 +1,6 @@
-// Types
-export type SkewerFlavor = 'Carne' | 'Frango' | 'Queijo' | 'Calabresa';
-export type Beverage = 'Coca-Cola' | 'Guaraná' | 'Água' | 'Suco';
+// Types - Now dynamic, no longer hardcoded
+export type SkewerFlavor = string;
+export type Beverage = string;
 
 export interface OrderItem {
   id: string;
@@ -27,16 +27,11 @@ export interface InventoryItem {
 
 // In-memory state
 let orders: Order[] = [];
-let inventory: InventoryItem[] = [
-  { flavor: 'Carne', quantity: 20 },
-  { flavor: 'Frango', quantity: 20 },
-  { flavor: 'Queijo', quantity: 20 },
-  { flavor: 'Calabresa', quantity: 20 },
-];
+let inventory: InventoryItem[] = [];
 
-// Dynamic products received via webhook
-let availableFlavors: SkewerFlavor[] = ['Carne', 'Frango', 'Queijo', 'Calabresa'];
-let availableBeverages: Beverage[] = ['Coca-Cola', 'Guaraná', 'Água', 'Suco'];
+// Dynamic products - now truly dynamic based on external data
+let availableFlavors: SkewerFlavor[] = [];
+let availableBeverages: Beverage[] = ['Coca-Cola', 'Guaraná', 'Água', 'Suco']; // Default beverages
 let lastSync: Date | null = null;
 
 // Utility functions
@@ -76,6 +71,15 @@ export function updateInventory(updates: Partial<Record<SkewerFlavor, number>>):
       setInventory(flavor, quantity);
     }
   });
+}
+
+// New function to replace entire inventory from external source
+export function replaceInventory(newInventory: InventoryItem[]): void {
+  inventory = [...newInventory];
+  
+  // Update available flavors based on inventory
+  const uniqueFlavors = [...new Set(newInventory.map(item => item.flavor))];
+  availableFlavors = uniqueFlavors;
 }
 
 // Order management
@@ -216,5 +220,11 @@ export function markSyncTime(): void {
 // Enhanced inventory functions with sync support
 export function syncInventoryFromWebhook(updates: Partial<Record<SkewerFlavor, number>>): void {
   updateInventory(updates);
+  markSyncTime();
+}
+
+// New function to sync entire inventory from external source
+export function syncInventoryFromExternal(newInventory: InventoryItem[]): void {
+  replaceInventory(newInventory);
   markSyncTime();
 }

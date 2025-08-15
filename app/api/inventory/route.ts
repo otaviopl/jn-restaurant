@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getInventory, updateInventory, syncInventoryFromWebhook, SkewerFlavor } from '@/lib/store';
+import { getInventory, updateInventory, syncInventoryFromWebhook, syncInventoryFromExternal, SkewerFlavor } from '@/lib/store';
 import { sendWebhook, createInventoryWebhookPayload } from '@/lib/webhook';
 import { fetchExternalInventory } from '@/lib/external-data';
 
@@ -9,12 +9,8 @@ export async function GET() {
     const externalInventory = await fetchExternalInventory();
     
     if (externalInventory) {
-      // Sync external data to local store
-      const updates: Partial<Record<SkewerFlavor, number>> = {};
-      externalInventory.forEach(item => {
-        updates[item.flavor] = item.quantity;
-      });
-      syncInventoryFromWebhook(updates);
+      // Sync external data to local store (complete replacement for dynamic flavors)
+      syncInventoryFromExternal(externalInventory);
       
       return NextResponse.json(externalInventory, {
         headers: {
@@ -59,10 +55,8 @@ export async function PATCH(request: NextRequest) {
     }
 
     // Validate updates
-    const validFlavors: SkewerFlavor[] = ['Carne', 'Frango', 'Queijo', 'Calabresa'];
-    
     for (const [flavor, quantity] of Object.entries(updates)) {
-      if (!validFlavors.includes(flavor as SkewerFlavor)) {
+      if (!flavor || typeof flavor !== 'string' || flavor.trim() === '') {
         return NextResponse.json(
           { error: `Sabor inválido: ${flavor}` },
           { status: 400 }

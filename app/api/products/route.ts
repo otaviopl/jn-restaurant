@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getProductsInfo, updateAvailableProducts } from '@/lib/store';
+import { getAvailableFlavors, getAvailableBeverages, getLastSyncTime } from '@/lib/store';
 import { fetchExternalProducts } from '@/lib/external-data';
 
 export async function GET() {
@@ -8,17 +8,12 @@ export async function GET() {
     const externalProducts = await fetchExternalProducts();
     
     if (externalProducts) {
-      // Update local store with external data
-      updateAvailableProducts(externalProducts.flavors, externalProducts.beverages);
-      
-      const updatedInfo = getProductsInfo();
-      
+      // If we have external products, return them with sync info
       return NextResponse.json({
-        ...updatedInfo,
-        lastSyncFormatted: updatedInfo.lastSync ? updatedInfo.lastSync.toISOString() : null,
-        isSynced: !!updatedInfo.lastSync,
-        syncAge: updatedInfo.lastSync ? 
-          Math.floor((Date.now() - updatedInfo.lastSync.getTime()) / 1000) : null,
+        flavors: externalProducts.flavors,
+        beverages: externalProducts.beverages,
+        lastSync: getLastSyncTime(),
+        lastSyncFormatted: getLastSyncTime()?.toISOString(),
         dataSource: 'external'
       }, {
         headers: {
@@ -28,15 +23,16 @@ export async function GET() {
       });
     }
     
-    // Fallback to local products
-    const productsInfo = getProductsInfo();
+    // Fallback to locally stored flavors (derived from inventory sync)
+    const flavors = getAvailableFlavors();
+    const beverages = getAvailableBeverages();
+    const lastSync = getLastSyncTime();
     
     return NextResponse.json({
-      ...productsInfo,
-      lastSyncFormatted: productsInfo.lastSync ? productsInfo.lastSync.toISOString() : null,
-      isSynced: !!productsInfo.lastSync,
-      syncAge: productsInfo.lastSync ? 
-        Math.floor((Date.now() - productsInfo.lastSync.getTime()) / 1000) : null,
+      flavors: flavors.length > 0 ? flavors : ['Carne', 'Frango', 'Queijo', 'Calabresa'], // Ultimate fallback
+      beverages: beverages.length > 0 ? beverages : ['Coca-Cola', 'Guaraná', 'Água', 'Suco'], // Ultimate fallback
+      lastSync,
+      lastSyncFormatted: lastSync?.toISOString(),
       dataSource: 'local'
     }, {
       headers: {
@@ -45,23 +41,19 @@ export async function GET() {
       }
     });
   } catch (error) {
-    console.error('Error fetching products:', error);
+    console.error('Error in products GET:', error);
     
-    // Always fallback to local data on error
-    const productsInfo = getProductsInfo();
-    
+    // Always fallback to some products on error
     return NextResponse.json({
-      ...productsInfo,
-      lastSyncFormatted: productsInfo.lastSync ? productsInfo.lastSync.toISOString() : null,
-      isSynced: !!productsInfo.lastSync,
-      syncAge: productsInfo.lastSync ? 
-        Math.floor((Date.now() - productsInfo.lastSync.getTime()) / 1000) : null,
-      dataSource: 'local',
-      error: 'External API unavailable'
+      flavors: ['Carne', 'Frango', 'Queijo', 'Calabresa'],
+      beverages: ['Coca-Cola', 'Guaraná', 'Água', 'Suco'],
+      lastSync: null,
+      lastSyncFormatted: null,
+      dataSource: 'error-fallback'
     }, {
       headers: {
-        'X-Data-Source': 'local',
-        'X-Cache-Status': 'error-fallback'
+        'X-Data-Source': 'error-fallback',
+        'X-Cache-Status': 'error'
       }
     });
   }
