@@ -1,0 +1,126 @@
+:root {
+  --primary-color: #fd7e14;
+  --success-color: #28a745;
+  --warning-color: #ffc107;
+  --danger-color: #dc3545;
+  --info-color: #17a2b8;
+  --dark-color: #343a40;
+}
+
+body {
+  background-color: #f8f9fa;
+  font-family: 'Inter', sans-serif;
+}
+
+.navbar-brand {
+  font-weight: 700 !important;
+  font-size: 1.5rem !important;
+}
+
+.card {
+  border: none;
+  box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+  border-radius: 0.5rem;
+}
+
+.card-header {
+  background-color: white;
+  border-bottom: 1px solid #dee2e6;
+  padding: 1.25rem;
+  font-weight: 600;
+  font-size: 1.1rem;
+}
+
+.btn {
+  border-radius: 0.375rem;
+  font-weight: 500;
+  padding: 0.5rem 1rem;
+}
+
+.btn-primary {
+  background-color: var(--primary-color);
+  border-color: var(--primary-color);
+}
+
+.btn-primary:hover {
+  background-color: #e8690b;
+  border-color: #e8690b;
+}
+
+.badge {
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 0.375rem 0.5rem;
+}
+
+.low-stock {
+  background-color: var(--warning-color) !important;
+  color: #212529 !important;
+}
+
+.out-of-stock {
+  background-color: var(--danger-color) !important;
+  color: white !important;
+}
+
+.order-delivered {
+  background-color: #d4edda;
+  border-left: 4px solid var(--success-color);
+}
+
+.order-preparing {
+  background-color: #fff3cd;
+  border-left: 4px solid var(--warning-color);
+}
+
+.form-control:focus {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 0.2rem rgba(253, 126, 20, 0.25);
+}
+
+.table th {
+  border-top: none;
+  font-weight: 600;
+  color: var(--dark-color);
+  padding: 1rem 0.75rem;
+}
+
+.table td {
+  padding: 1rem 0.75rem;
+  vertical-align: middle;
+}
+
+.inventory-card {
+  position: sticky;
+  top: 20px;
+}
+
+.order-item {
+  margin-bottom: 1rem;
+  padding: 1rem;
+  background-color: white;
+  border-radius: 0.5rem;
+  border: 1px solid #dee2e6;
+}
+
+.delivered-qty-input {
+  width: 80px;
+  text-align: center;
+}
+
+.stock-badge {
+  font-size: 0.7rem;
+  margin-left: 0.5rem;
+}
+
+@media (max-width: 768px) {
+  .container-fluid {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+  
+  .inventory-card {
+    position: static;
+    margin-bottom: 2rem;
+  }
+}
