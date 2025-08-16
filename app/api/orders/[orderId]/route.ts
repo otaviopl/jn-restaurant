@@ -61,6 +61,30 @@ export async function PUT(
   }
 }
 
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: { orderId: string } }
+) {
+  try {
+    const { orderId } = params;
+    const body = await request.json();
+    const result = await updateOrder(orderId, { status: body.status });
+    if (!result.success) {
+      return NextResponse.json(
+        { error: result.message },
+        { status: 400 }
+      );
+    }
+    return NextResponse.json(result.order);
+  } catch (error) {
+    console.error('Error patching order:', error);
+    return NextResponse.json(
+      { error: 'Erro interno do servidor' },
+      { status: 500 }
+    );
+  }
+}
+
 export async function DELETE(
   request: NextRequest,
   { params }: { params: { orderId: string } }

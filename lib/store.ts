@@ -53,7 +53,7 @@ const db = {
     try {
       const fileContent = await fs.readFile(dbPath, 'utf-8');
       memoryCache = JSON.parse(fileContent);
-      console.log('lib/store: Inventory after db.read() from file:', memoryCache.inventory);
+      console.log('lib/store: Inventory after db.read() from file:', memoryCache?.inventory);
       return memoryCache!;
     } catch (error: any) {
       if (error.code === 'ENOENT') {
