@@ -121,13 +121,10 @@ type ExternalOrdersResponse = ExternalOrderItem[];
  */
 export async function fetchExternalInventory(): Promise<InventoryItem[] | null> {
   if (!EXTERNAL_INVENTORY_URL) {
-    console.log('EXTERNAL_INVENTORY_URL not configured, using default inventory');
     return null;
   }
 
   try {
-    console.log('Fetching inventory from external API:', EXTERNAL_INVENTORY_URL);
-    
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'User-Agent': 'JN-Burger-Backoffice/1.0.0',
@@ -176,8 +173,6 @@ export async function fetchExternalInventory(): Promise<InventoryItem[] | null> 
         quantity: current.quantity + Math.max(0, item.Estoque),
         initialQuantity: current.initialQuantity + Math.max(0, item["Quantidade Inicial"] || 0)
       });
-      
-      console.log(`Processed flavor '${normalizedFlavor}': ${item.Estoque} current, ${item["Quantidade Inicial"]} initial`);
     }
 
     // Convert map to InventoryItem array
@@ -187,7 +182,6 @@ export async function fetchExternalInventory(): Promise<InventoryItem[] | null> 
       initialQuantity: data.initialQuantity
     }));
 
-    console.log('External inventory processed successfully:', inventoryItems);
     return inventoryItems;
 
   } catch (error) {
@@ -203,13 +197,10 @@ export async function fetchExternalInventory(): Promise<InventoryItem[] | null> 
 export async function fetchExternalProducts(): Promise<{ flavors: SkewerFlavor[]; beverages: Beverage[] } | null> {
   // If no products URL, try to derive flavors from inventory
   if (!EXTERNAL_PRODUCTS_URL) {
-    console.log('EXTERNAL_PRODUCTS_URL not configured, trying to derive from inventory');
     return await deriveProductsFromInventory();
   }
 
   try {
-    console.log('Fetching products from external API:', EXTERNAL_PRODUCTS_URL);
-    
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'User-Agent': 'JN-Burger-Backoffice/1.0.0',
@@ -247,7 +238,6 @@ export async function fetchExternalProducts(): Promise<{ flavors: SkewerFlavor[]
       beverages: beverages.length > 0 ? beverages : ['Coca-Cola', 'Guaraná', 'Água', 'Suco'] // fallback
     };
 
-    console.log('External products fetched successfully:', result);
     return result;
 
   } catch (error) {
@@ -274,62 +264,6 @@ export async function fetchAllExternalData(): Promise<{
     products: products.status === 'fulfilled' ? products.value : null,
     timestamp: new Date()
   };
-}
-
-/**
- * Fetch external data with shorter cache for real-time updates
- */
-export async function fetchExternalInventoryRealtime(): Promise<InventoryItem[] | null> {
-  if (!EXTERNAL_INVENTORY_URL) return null;
-
-  try {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
-
-    if (API_KEY) {
-      headers['Authorization'] = `Bearer ${API_KEY}`;
-    }
-
-    const response = await fetch(EXTERNAL_INVENTORY_URL, {
-      headers,
-      next: { 
-        revalidate: 30, // 30 seconds for real-time updates
-        tags: ['external-inventory-realtime']
-      }
-    });
-
-    if (!response.ok) return null;
-
-    const data: ExternalInventoryResponse = await response.json();
-    
-    if (!Array.isArray(data)) {
-      return null;
-    }
-    
-    // Initialize inventory map
-    const inventoryMap = new Map<SkewerFlavor, number>();
-
-    // Process each item from external API
-    for (const item of data) {
-      if (!item.Espetinhos || typeof item.Estoque !== 'number') {
-        continue;
-      }
-
-      const normalizedFlavor = normalizeFlavorName(item.Espetinhos);
-      const currentQty = inventoryMap.get(normalizedFlavor) || 0;
-      inventoryMap.set(normalizedFlavor, currentQty + Math.max(0, item.Estoque));
-    }
-
-    return Array.from(inventoryMap.entries()).map(([flavor, quantity]) => ({
-      flavor,
-      quantity
-    }));
-
-  } catch (error) {
-    console.error('Error fetching realtime inventory:', error);
-    return null;
-  }
 }
 
 /**
@@ -379,8 +313,6 @@ async function deriveProductsFromInventory(): Promise<{ flavors: SkewerFlavor[];
     const flavors = Array.from(flavorsSet);
     const beverages: Beverage[] = ['Coca-Cola', 'Guaraná', 'Água', 'Suco']; // Default beverages
 
-    console.log('Derived products from inventory:', { flavors, beverages });
-    
     return { flavors, beverages };
 
   } catch (error) {
@@ -394,13 +326,10 @@ async function deriveProductsFromInventory(): Promise<{ flavors: SkewerFlavor[];
  */
 export async function fetchExternalOrders(): Promise<Order[] | null> {
   if (!EXTERNAL_ORDERS_URL) {
-    console.log('EXTERNAL_ORDERS_URL not configured, using local orders');
     return null;
   }
 
   try {
-    console.log('Fetching orders from external API:', EXTERNAL_ORDERS_URL);
-    
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'User-Agent': 'JN-Burger-Backoffice/1.0.0',
@@ -456,10 +385,8 @@ export async function fetchExternalOrders(): Promise<Order[] | null> {
       };
 
       orders.push(order);
-      console.log(`Processed external order for '${order.customerName}' with ${order.items.length} items`);
     }
 
-    console.log('External orders processed successfully:', orders.length, 'orders');
     return orders;
 
   } catch (error) {

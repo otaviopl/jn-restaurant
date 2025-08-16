@@ -44,9 +44,11 @@ export async function POST(request: NextRequest) {
     }
 
     // Preparar payload no formato esperado pela API externa
-    const payload = [{
+    const payload: Array<Record<string, any>> = [{
       row_number: row_number,
-      itens: itemsString
+      itens: itemsString,
+      cliente: customerName || undefined, // Initialize cliente property
+      situacao: status ? (status === 'em_preparo' ? 'Em preparo' : 'Entregue') : undefined // Initialize situacao property
     }];
 
     // Se outros campos forem fornecidos, adicionar ao payload

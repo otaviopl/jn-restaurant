@@ -37,7 +37,8 @@ interface DbData {
   products: {
     flavors: SkewerFlavor[];
     beverages: Beverage[];
-  }
+  };
+  lastSync?: Date; // Add lastSync property
 }
 
 // --- DATABASE (JSON file) ---
@@ -67,7 +68,8 @@ const db = {
           products: {
             flavors: initialInventory?.map(i => i.flavor) || [],
             beverages: ['Coca-Cola', 'Guaraná', 'Água', 'Suco']
-          }
+          },
+          lastSync: new Date() // Initialize lastSync
         };
         await db.write(initialData);
         memoryCache = initialData;
@@ -77,11 +79,23 @@ const db = {
     }
   },
   write: async (data: DbData) => {
+    data.lastSync = new Date(); // Update lastSync on write
     memoryCache = data;
     await fs.writeFile(dbPath, JSON.stringify(data, null, 2), 'utf-8');
   }
 };
 
+export function getLastSyncTime(): Date | undefined {
+  return memoryCache?.lastSync;
+}
+
+export function getAvailableFlavors(): SkewerFlavor[] {
+  return memoryCache?.products?.flavors || [];
+}
+
+export function getAvailableBeverages(): Beverage[] {
+  return memoryCache?.products?.beverages || [];
+}
 
 // --- UTILITY FUNCTIONS ---
 function generateId(prefix = 'local'): string {
@@ -91,6 +105,26 @@ function generateId(prefix = 'local'): string {
 function calculateOrderStatus(order: Order): 'em_preparo' | 'entregue' {
   const allDelivered = order.items.every(item => item.deliveredQty >= item.qty);
   return allDelivered ? 'entregue' : 'em_preparo';
+}
+
+// Helper to adjust inventory quantity with validation
+async function adjustInventoryQuantity(
+  dbData: DbData,
+  flavor: SkewerFlavor,
+  change: number // positive for decrement, negative for increment
+): Promise<{ success: boolean; message?: string }> {
+  const inventoryItem = dbData.inventory.find(inv => inv.flavor === flavor);
+
+  if (!inventoryItem) {
+    return { success: false, message: `Sabor de espeto "${flavor}" não encontrado no inventário.` };
+  }
+
+  if (inventoryItem.quantity < change) {
+    return { success: false, message: `Estoque insuficiente para ${flavor}. Disponível: ${inventoryItem.quantity}, Necessário: ${change}` };
+  }
+
+  inventoryItem.quantity -= change;
+  return { success: true };
 }
 
 // --- INVENTORY MANAGEMENT ---
@@ -136,25 +170,12 @@ export async function createOrder(
 ): Promise<{ success: boolean; message?: string; order?: Order }> {
   const dbData = await db.read();
 
-  // Validate stock
+  // Adjust stock
   for (const item of items) {
     if (item.type === 'skewer' && item.flavor) {
-      const inventoryItem = dbData.inventory.find(inv => inv.flavor === item.flavor);
-      if (!inventoryItem || inventoryItem.quantity < item.qty) {
-        return {
-          success: false,
-          message: `Estoque insuficiente para ${item.flavor}. Disponível: ${inventoryItem?.quantity || 0}`
-        };
-      }
-    }
-  }
-
-  // Decrement stock
-  for (const item of items) {
-    if (item.type === 'skewer' && item.flavor) {
-      const inventoryItem = dbData.inventory.find(inv => inv.flavor === item.flavor);
-      if (inventoryItem) {
-        inventoryItem.quantity -= item.qty;
+      const result = await adjustInventoryQuantity(dbData, item.flavor, item.qty);
+      if (!result.success) {
+        return { success: false, message: result.message };
       }
     }
   }
@@ -215,24 +236,21 @@ export async function updateOrder(
       }
     });
 
-    // Validate stock before applying any changes
-    for (const [flavor, qtyChange] of stockChanges.entries()) {
-      if (qtyChange > 0) { // We need to take from stock
-        const inventoryItem = dbData.inventory.find(inv => inv.flavor === flavor);
-        if (!inventoryItem || inventoryItem.quantity < qtyChange) {
-          return {
-            success: false,
-            message: `Estoque insuficiente para ${flavor}. Disponível: ${inventoryItem?.quantity || 0}, Necessário: ${qtyChange}`
-          };
+    // Apply stock changes with validation
+    for (const [flavor, qtyChange] of Array.from(stockChanges.entries())) {
+      if (qtyChange !== 0) { // Only apply if there's a change
+        const result = await adjustInventoryQuantity(dbData, flavor, qtyChange);
+        if (!result.success) {
+          // If stock is insufficient for a decrement, revert previous changes and return error
+          // This is a simplified rollback. A more robust solution might involve a transaction system.
+          for (const [prevFlavor, prevQtyChange] of Array.from(stockChanges.entries())) {
+            if (prevFlavor === flavor) break; // Stop at the current flavor
+            if (prevQtyChange !== 0) {
+              await adjustInventoryQuantity(dbData, prevFlavor, -prevQtyChange); // Revert previous changes
+            }
+          }
+          return { success: false, message: result.message };
         }
-      }
-    }
-
-    // Apply stock changes
-    for (const [flavor, qtyChange] of stockChanges.entries()) {
-      const inventoryItem = dbData.inventory.find(inv => inv.flavor === flavor);
-      if (inventoryItem) {
-        inventoryItem.quantity -= qtyChange;
       }
     }
 
@@ -301,16 +319,12 @@ export async function updateOrderItem(
     // Handle inventory changes if quantity is updated
     if (updates.qty !== undefined && item.type === 'skewer' && item.flavor) {
         const qtyDifference = updates.qty - item.qty;
-        const inventoryItem = dbData.inventory.find(inv => inv.flavor === item.flavor);
-
-        if (!inventoryItem) {
-            return { success: false, message: `Sabor de espeto "${item.flavor}" não encontrado no inventário.` };
+        if (qtyDifference !== 0) { // Only adjust if there's a change
+            const result = await adjustInventoryQuantity(dbData, item.flavor, qtyDifference);
+            if (!result.success) {
+                return result; // Return error message from helper
+            }
         }
-
-        if (qtyDifference > inventoryItem.quantity) {
-            return { success: false, message: `Estoque insuficiente para ${item.flavor}. Apenas ${inventoryItem.quantity} disponível.` };
-        }
-        inventoryItem.quantity -= qtyDifference;
     }
 
     if (updates.qty !== undefined) {
@@ -351,9 +365,11 @@ export async function deleteOrderItem(orderId: string, itemId: string): Promise<
 
     // Restore inventory
     if (deletedItem.type === 'skewer' && deletedItem.flavor) {
-        const inventoryItem = dbData.inventory.find(inv => inv.flavor === deletedItem.flavor);
-        if (inventoryItem) {
-            inventoryItem.quantity += deletedItem.qty;
+        const result = await adjustInventoryQuantity(dbData, deletedItem.flavor, -deletedItem.qty); // Increment quantity
+        if (!result.success) {
+            console.error(`Failed to restore inventory for ${deletedItem.flavor}: ${result.message}`);
+            // Decide how to handle this error: should deletion proceed if inventory can't be restored?
+            // For now, we'll just log and proceed with deletion.
         }
     }
 

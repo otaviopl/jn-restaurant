@@ -1,16 +1,41 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { listOrders, createOrder } from '@/lib/store';
+import { listOrders, createOrder, syncOrdersFromExternal } from '@/lib/store';
+import { fetchExternalOrders } from '@/lib/external-data';
 import { createOrderWebhookPayload, sendWebhook } from '@/lib/webhook';
 
 export async function GET() {
   try {
-    // The store now handles its own data loading from the JSON file.
-    // This GET handler simply requests the data.
+    const externalOrders = await fetchExternalOrders();
+    
+    if (externalOrders) {
+      syncOrdersFromExternal(externalOrders);
+      
+      return NextResponse.json(externalOrders, {
+        headers: {
+          'X-Data-Source': 'external',
+          'X-Cache-Status': 'fresh',
+          'X-Route-Note': 'synced-from-external'
+        }
+      });
+    }
+    
     const orders = await listOrders();
-    return NextResponse.json(orders);
+    return NextResponse.json(orders, {
+      headers: {
+        'X-Data-Source': 'local-fallback',
+        'X-Cache-Status': 'external-unavailable'
+      }
+    });
   } catch (error) {
     console.error('Error in orders GET:', error);
-    return NextResponse.json({ error: 'Failed to fetch orders' }, { status: 500 });
+    
+    const orders = await listOrders();
+    return NextResponse.json(orders, {
+      headers: {
+        'X-Data-Source': 'local-emergency',
+        'X-Cache-Status': 'error-fallback'
+      }
+    });
   }
 }
 
