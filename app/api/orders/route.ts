@@ -8,9 +8,10 @@ export async function GET() {
     const externalOrders = await fetchExternalOrders();
     
     if (externalOrders) {
-      syncOrdersFromExternal(externalOrders);
-      
-      return NextResponse.json(externalOrders, {
+      await syncOrdersFromExternal(externalOrders);
+      // After syncing, retrieve the normalized orders from the store
+      const orders = await listOrders();
+      return NextResponse.json(orders, {
         headers: {
           'X-Data-Source': 'external',
           'X-Cache-Status': 'fresh',

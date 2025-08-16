@@ -15,7 +15,34 @@ const DEFAULT_REVALIDATE = 300;
 
 // Function to normalize external flavor names to consistent format
 function normalizeFlavorName(externalFlavor: string): SkewerFlavor {
-  return externalFlavor.trim().toLowerCase();
+  if (!externalFlavor) return '';
+  
+  // Clean and normalize the flavor name
+  let normalized = externalFlavor.trim();
+  
+  // Common corrections and normalizations
+  const corrections: Record<string, string> = {
+    'quejio': 'queijo',
+    'quieijo': 'queijo',
+    'qeuijo': 'queijo',
+    'pao de alho': 'pão de alho',
+    'pão de alho': 'pão de alho',
+    'medalhao mandioca': 'medalhão mandioca',
+    'medalhao frango': 'medalhão frango',
+    'coracao': 'coração',
+    'coração': 'coração'
+  };
+  
+  const lowerNormalized = normalized.toLowerCase();
+  
+  // Apply corrections
+  for (const [wrong, correct] of Object.entries(corrections)) {
+    if (lowerNormalized.includes(wrong)) {
+      return correct;
+    }
+  }
+  
+  return normalized;
 }
 
 // Function to parse items string from external orders
@@ -25,7 +52,21 @@ function parseOrderItems(itemsString: string, availableFlavors: SkewerFlavor[]):
   }
 
   const items: OrderItem[] = [];
-  const lines = itemsString.split('\n').filter(line => line.trim());
+  // Try different separators: slash-separated (most common), newline-separated, or comma-separated
+  let lines: string[] = [];
+  
+  if (itemsString.includes(' / ')) {
+    lines = itemsString.split(' / ').filter(line => line.trim());
+  } else if (itemsString.includes('/')) {
+    lines = itemsString.split('/').filter(line => line.trim());
+  } else if (itemsString.includes('\n')) {
+    lines = itemsString.split('\n').filter(line => line.trim());
+  } else if (itemsString.includes(',')) {
+    lines = itemsString.split(',').filter(line => line.trim());
+  } else {
+    // Single item
+    lines = [itemsString.trim()];
+  }
 
   for (const line of lines) {
     const trimmedLine = line.trim();
@@ -50,12 +91,27 @@ function parseOrderItems(itemsString: string, availableFlavors: SkewerFlavor[]):
         type = 'beverage';
         beverage = normalizeFlavorName(itemName); // Use normalizeFlavorName for beverages too
       } else {
-        // Try to match against available flavors
-        const matchedFlavor = availableFlavors.find(f => normalizeFlavorName(itemName).includes(normalizeFlavorName(f)));
+        // Try to match against available flavors with flexible matching
+        const normalizedItemName = normalizeFlavorName(itemName).toLowerCase();
+        
+        // First try exact match
+        let matchedFlavor = availableFlavors.find(f => 
+          normalizeFlavorName(f).toLowerCase() === normalizedItemName
+        );
+        
+        // If no exact match, try partial matching
+        if (!matchedFlavor) {
+          matchedFlavor = availableFlavors.find(f => {
+            const normalizedFlavor = normalizeFlavorName(f).toLowerCase();
+            return normalizedItemName.includes(normalizedFlavor) || 
+                   normalizedFlavor.includes(normalizedItemName);
+          });
+        }
+        
         if (matchedFlavor) {
           flavor = matchedFlavor;
         } else {
-          // Fallback if no specific flavor match, but it's a skewer type
+          // Fallback: use the normalized name as-is
           flavor = normalizeFlavorName(itemName);
         }
       }
@@ -126,16 +182,31 @@ function parseOrderItems(itemsString: string, availableFlavors: SkewerFlavor[]):
   return items;
 }
 
-// Function to map external status to internal status
-function mapOrderStatus(externalStatus: string): 'em_preparo' | 'entregue' {
+// Function to map external status to internal Kanban status
+function mapOrderStatus(externalStatus: any): 'todo' | 'in_progress' | 'done' | 'canceled' {
+  if (typeof externalStatus !== 'string') {
+    console.warn('Invalid external status received, expected string but got:', externalStatus);
+    return 'in_progress';
+  }
   const lowerStatus = externalStatus.toLowerCase().trim();
   
-  if (lowerStatus.includes('entregue') || lowerStatus.includes('finalizado') || 
-      lowerStatus.includes('concluído') || lowerStatus.includes('pronto')) {
-    return 'entregue';
+  // Map to Kanban statuses
+  if (lowerStatus.includes('todo') || lowerStatus.includes('a fazer') || lowerStatus.includes('pendente')) {
+    return 'todo';
   }
   
-  return 'em_preparo'; // default to preparing
+  if (lowerStatus.includes('entregue') || lowerStatus.includes('finalizado') || 
+      lowerStatus.includes('concluído') || lowerStatus.includes('pronto') || lowerStatus.includes('done')) {
+    return 'done';
+  }
+  
+  if (lowerStatus.includes('cancelado') || lowerStatus.includes('canceled') || 
+      lowerStatus.includes('cancelar') || lowerStatus.includes('rejeitado')) {
+    return 'canceled';
+  }
+  
+  // Default to in_progress for "Em preparo" and other preparing statuses
+  return 'in_progress';
 }
 
 interface ExternalInventoryItem {
@@ -489,3 +560,237 @@ export function isExternalDataConfigured(): {
     hasApiKey: !!API_KEY
   };
 }
+
+/**
+ * Sends inventory updates to external system
+ */
+export async function sendInventoryUpdate(updates: Partial<Record<SkewerFlavor, number>>): Promise<boolean> {
+  if (!EXTERNAL_INVENTORY_URL) {
+    console.warn('EXTERNAL_INVENTORY_URL is not configured. Inventory updates will not be sent to external API.');
+    return false;
+  }
+
+  try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'User-Agent': 'JN-Burger-Backoffice/1.0.0',
+    };
+
+    if (API_KEY) {
+      headers['Authorization'] = `Bearer ${API_KEY}`;
+    }
+
+    const response = await fetch(EXTERNAL_INVENTORY_URL, {
+      method: 'PATCH', // Assuming PATCH for partial updates
+      headers,
+      body: JSON.stringify({ updates }),
+    });
+
+    if (!response.ok) {
+      console.error(`Failed to send inventory update to external API: ${response.status} ${response.statusText}`);
+      return false;
+    }
+
+    console.log('Inventory update sent to external API successfully.');
+    return true;
+
+  } catch (error) {
+    console.error('Error sending inventory update to external API:', error);
+    return false;
+  }
+}
+
+/**
+ * Sends a new order to external system
+ */
+export async function sendCreateOrder(order: Order): Promise<boolean> {
+  if (!EXTERNAL_ORDERS_URL) {
+    console.warn('EXTERNAL_ORDERS_URL is not configured. New orders will not be sent to external API.');
+    return false;
+  }
+
+  try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'User-Agent': 'JN-Burger-Backoffice/1.0.0',
+    };
+
+    if (API_KEY) {
+      headers['Authorization'] = `Bearer ${API_KEY}`;
+    }
+
+    const response = await fetch(EXTERNAL_ORDERS_URL, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(order),
+    });
+
+    if (!response.ok) {
+      console.error(`Failed to send new order to external API: ${response.status} ${response.statusText}`);
+      return false;
+    }
+
+    console.log('New order sent to external API successfully.');
+    return true;
+
+  } catch (error) {
+    console.error('Error sending new order to external API:', error);
+    return false;
+  }
+}
+
+/**
+ * Sends an updated order to external system
+ */
+export async function sendUpdateOrder(orderId: string, updates: Partial<Order>): Promise<boolean> {
+  if (!EXTERNAL_ORDERS_URL) {
+    console.warn('EXTERNAL_ORDERS_URL is not configured. Order updates will not be sent to external API.');
+    return false;
+  }
+
+  try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'User-Agent': 'JN-Burger-Backoffice/1.0.0',
+    };
+
+    if (API_KEY) {
+      headers['Authorization'] = `Bearer ${API_KEY}`;
+    }
+
+    const response = await fetch(`${EXTERNAL_ORDERS_URL}/${orderId}`, {
+      method: 'PUT', // Assuming PUT for full replacement or PATCH for partial
+      headers,
+      body: JSON.stringify(updates),
+    });
+
+    if (!response.ok) {
+      console.error(`Failed to send order update to external API: ${response.status} ${response.statusText}`);
+      return false;
+    }
+
+    console.log(`Order ${orderId} updated on external API successfully.`);
+    return true;
+
+  } catch (error) {
+    console.error('Error sending order update to external API:', error);
+    return false;
+  }
+}
+
+/**
+ * Sends a delete order request to external system
+ */
+export async function sendDeleteOrder(orderId: string): Promise<boolean> {
+  if (!EXTERNAL_ORDERS_URL) {
+    console.warn('EXTERNAL_ORDERS_URL is not configured. Order deletions will not be sent to external API.');
+    return false;
+  }
+
+  try {
+    const headers: Record<string, string> = {
+      'User-Agent': 'JN-Burger-Backoffice/1.0.0',
+    };
+
+    if (API_KEY) {
+      headers['Authorization'] = `Bearer ${API_KEY}`;
+    }
+
+    const response = await fetch(`${EXTERNAL_ORDERS_URL}/${orderId}`, {
+      method: 'DELETE',
+      headers,
+    });
+
+    if (!response.ok) {
+      console.error(`Failed to send order deletion to external API: ${response.status} ${response.statusText}`);
+      return false;
+    }
+
+    console.log(`Order ${orderId} deleted on external API successfully.`);
+    return true;
+
+  } catch (error) {
+    console.error('Error sending order deletion to external API:', error);
+    return false;
+  }
+}
+
+/**
+ * Sends an updated order item to external system
+ */
+export async function sendUpdateOrderItem(orderId: string, itemId: string, updates: Partial<OrderItem>): Promise<boolean> {
+  if (!EXTERNAL_ORDERS_URL) {
+    console.warn('EXTERNAL_ORDERS_URL is not configured. Order item updates will not be sent to external API.');
+    return false;
+  }
+
+  try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'User-Agent': 'JN-Burger-Backoffice/1.0.0',
+    };
+
+    if (API_KEY) {
+      headers['Authorization'] = `Bearer ${API_KEY}`;
+    }
+
+    // Assuming a specific endpoint for item updates, or a PATCH to the order with item details
+    // For simplicity, let's assume a PATCH to the order endpoint with the item ID in the body or URL
+    // A more robust API would have a dedicated endpoint like /orders/{orderId}/items/{itemId}
+    const response = await fetch(`${EXTERNAL_ORDERS_URL}/${orderId}/items/${itemId}`, {
+      method: 'PATCH', // Assuming PATCH for partial item updates
+      headers,
+      body: JSON.stringify(updates),
+    });
+
+    if (!response.ok) {
+      console.error(`Failed to send order item update to external API: ${response.status} ${response.statusText}`);
+      return false;
+    }
+
+    console.log(`Order item ${itemId} for order ${orderId} updated on external API successfully.`);
+    return true;
+
+  } catch (error) {
+    console.error('Error sending order item update to external API:', error);
+    return false;
+  }
+}
+
+/**
+ * Sends a delete order item request to external system
+ */
+export async function sendDeleteOrderItem(orderId: string, itemId: string): Promise<boolean> {
+  if (!EXTERNAL_ORDERS_URL) {
+    console.warn('EXTERNAL_ORDERS_URL is not configured. Order item deletions will not be sent to external API.');
+    return false;
+  }
+
+  try {
+    const headers: Record<string, string> = {
+      'User-Agent': 'JN-Burger-Backoffice/1.0.0',
+    };
+
+    if (API_KEY) {
+      headers['Authorization'] = `Bearer ${API_KEY}`;
+    }
+
+    const response = await fetch(`${EXTERNAL_ORDERS_URL}/${orderId}/items/${itemId}`, {
+      method: 'DELETE',
+      headers,
+    });
+
+    if (!response.ok) {
+      console.error(`Failed to send order item deletion to external API: ${response.status} ${response.statusText}`);
+      return false;
+    }
+
+    console.log(`Order item ${itemId} for order ${orderId} deleted on external API successfully.`);
+    return true;
+
+  } catch (error) {
+    console.error('Error sending order item deletion to external API:', error);
+    return false;
+  }
+}
+

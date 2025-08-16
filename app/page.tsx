@@ -23,13 +23,11 @@ import {
 } from 'reactstrap';
 import { Icon } from '@iconify/react';
 import { Order, OrderItem, SkewerFlavor, Beverage, InventoryItem } from '@/lib/store';
-
-interface NewOrderItem {
-  type: 'skewer' | 'beverage';
-  flavor?: SkewerFlavor;
-  beverage?: Beverage;
-  qty: number;
-}
+import KanbanBoard, { KanbanColumnId } from '@/components/KanbanBoard';
+import InventoryPanel from '@/components/InventoryPanel';
+import UpdateInventoryModal from '@/components/UpdateInventoryModal';
+import OrderModal from '@/components/modals/OrderModal'; // New import
+import DeleteConfirmModal from '@/components/modals/DeleteConfirmModal'; // New import
 
 export default function HomePage() {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -39,15 +37,106 @@ export default function HomePage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  // Form state
-  const [customerName, setCustomerName] = useState('');
-  const [orderItems, setOrderItems] = useState<NewOrderItem[]>([]);
+  const [updateInventoryModalOpen, setUpdateInventoryModalOpen] = useState(false);
+  const [orderModalOpen, setOrderModalOpen] = useState(false); // New state for OrderModal
+  const [orderToEdit, setOrderToEdit] = useState<Order | null>(null); // New state for editing order
+  const [deleteConfirmModalOpen, setDeleteConfirmModalOpen] = useState(false); // New state for DeleteConfirmModal
+  const [orderToDelete, setOrderToDelete] = useState<{ id: string; customerName: string } | null>(null); // New state for order to delete
 
-  // Edit modal state
-  const [editModalOpen, setEditModalOpen] = useState(false);
-  const [editingOrder, setEditingOrder] = useState<Order | null>(null);
-  const [editCustomerName, setEditCustomerName] = useState('');
-  const [editOrderItems, setEditOrderItems] = useState<NewOrderItem[]>([]);
+  const openUpdateInventoryModal = () => setUpdateInventoryModalOpen(true);
+  const closeUpdateInventoryModal = () => setUpdateInventoryModalOpen(false);
+
+  const openCreateOrderModal = () => {
+    
+    setOrderToEdit(null);
+    setOrderModalOpen(true);
+  };
+
+  const openEditOrderModal = (order: Order) => {
+    
+    setOrderToEdit(order);
+    setOrderModalOpen(true);
+  };
+
+  const closeOrderModal = () => {
+    
+    setOrderModalOpen(false);
+    loadData(); // Reload data after order saved
+  };
+
+  const openDeleteConfirmModal = (orderId: string, customerName: string) => {
+    
+    setOrderToDelete({ id: orderId, customerName });
+    setDeleteConfirmModalOpen(true);
+  };
+
+  const closeDeleteConfirmModal = () => {
+    setDeleteConfirmModalOpen(false);
+    setOrderToDelete(null);
+  };
+
+  const handleDeleteOrderConfirm = async () => {
+    if (!orderToDelete) return;
+    try {
+      const response = await fetch(`/api/orders/${orderToDelete.id}`, {
+        method: 'DELETE'
+      });
+
+      if (response.ok) {
+        setSuccess('Pedido excluído com sucesso!');
+        await loadData();
+        setTimeout(() => setSuccess(null), 3000);
+      } else {
+        const errorData = await response.json();
+        setError(errorData.error || 'Erro ao excluir pedido');
+      }
+    } catch (err) {
+      setError('Erro de conexão');
+    } finally {
+      closeDeleteConfirmModal();
+    }
+  };
+
+  const handleOrderDrop = async (orderId: string, newStatus: KanbanColumnId) => {
+    
+    const originalOrders = [...orders]; // Save current state for rollback
+
+    // Optimistic update
+    setOrders(prevOrders =>
+      prevOrders.map(order =>
+        order.id === orderId ? { ...order, status: newStatus } : order
+      )
+    );
+
+    try {
+      const response = await fetch(`/api/orders/${orderId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      });
+
+      if (!response.ok) {
+        let errorData;
+        try {
+          errorData = await response.json();
+        } catch (jsonError) {
+          console.error('Failed to parse error response for Kanban drop:', jsonError);
+          setError('Erro ao processar resposta do servidor ao mover pedido.');
+          setOrders(originalOrders); // Rollback on error
+          setTimeout(() => setError(null), 5000);
+          return; // Exit if JSON parsing fails
+        }
+        throw new Error(errorData.error || 'Erro ao atualizar status do pedido');
+      }
+
+      setSuccess('Status do pedido atualizado com sucesso!');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err: any) {
+      setError(err.message || 'Erro de conexão ao atualizar status do pedido');
+      setOrders(originalOrders); // Rollback on error
+      setTimeout(() => setError(null), 5000);
+    }
+  };
 
   // Dynamic products from external APIs
   const [flavors, setFlavors] = useState<SkewerFlavor[]>([]);
@@ -58,6 +147,39 @@ export default function HomePage() {
   useEffect(() => {
     loadData();
   }, []);
+
+  const forceRefreshData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      // First, trigger revalidation to force fresh data from external APIs
+      const revalidateResponse = await fetch('/api/revalidate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tags: ['external-inventory', 'external-products', 'external-orders'],
+          forceSync: true // Flag to force complete sync
+        })
+      });
+
+      if (!revalidateResponse.ok) {
+        console.warn('Revalidation failed, but continuing with data fetch');
+      }
+
+      // Then fetch the fresh data
+      await loadData();
+      
+      setSuccess('Dados atualizados com sucesso da API externa!');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err) {
+      console.error('Error force refreshing data:', err);
+      setError('Erro ao forçar atualização dos dados');
+      setTimeout(() => setError(null), 5000);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const loadData = async () => {
     try {
@@ -71,12 +193,14 @@ export default function HomePage() {
       if (ordersRes.ok) {
         const ordersData = await ordersRes.json();
         setOrders(ordersData);
+      } else {
+        console.error('app/page: Failed to fetch orders:', ordersRes.status, ordersRes.statusText);
       }
 
       if (inventoryRes.ok) {
         const inventoryData = await inventoryRes.json();
         setInventory(inventoryData);
-        console.log('app/page: Inventory state after loadData():', inventoryData);
+        
       }
 
       if (productsRes.ok) {
@@ -97,292 +221,6 @@ export default function HomePage() {
     }
   };
 
-  const addSkewerItem = () => {
-    const defaultFlavor = flavors.length > 0 ? flavors[0] : 'Carne';
-    setOrderItems([...orderItems, { type: 'skewer', flavor: defaultFlavor, qty: 1 }]);
-  };
-
-  const addBeverageItem = () => {
-    const defaultBeverage = beverages.length > 0 ? beverages[0] : 'Coca-Cola';
-    setOrderItems([...orderItems, { type: 'beverage', beverage: defaultBeverage, qty: 1 }]);
-  };
-
-  const removeItem = (index: number) => {
-    setOrderItems(orderItems.filter((_, i) => i !== index));
-  };
-
-  const updateItem = (index: number, updates: Partial<NewOrderItem>) => {
-    const newItems = [...orderItems];
-    newItems[index] = { ...newItems[index], ...updates };
-    setOrderItems(newItems);
-  };
-
-  const getAvailableStock = (flavor: SkewerFlavor): number => {
-    const item = inventory.find(inv => inv.flavor === flavor);
-    return item?.quantity || 0;
-  };
-
-  const isFlavorAvailable = (flavor: SkewerFlavor): boolean => {
-    return getAvailableStock(flavor) > 0;
-  };
-
-  const isFlavorLowStock = (flavor: SkewerFlavor): boolean => {
-    const stock = getAvailableStock(flavor);
-    return stock > 0 && stock < 5;
-  };
-
-  const canSubmitOrder = (): boolean => {
-    if (!customerName.trim() || orderItems.length === 0) return false;
-    
-    // Check if all skewer items have available stock
-    return orderItems.every(item => {
-      if (item.type === 'skewer' && item.flavor) {
-        return getAvailableStock(item.flavor) >= item.qty;
-      }
-      return true;
-    });
-  };
-
-  const submitOrder = async () => {
-    if (!canSubmitOrder()) return;
-
-    try {
-      setSubmitting(true);
-      setError(null);
-
-      const response = await fetch('/api/orders', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          customerName: customerName.trim(),
-          items: orderItems
-        })
-      });
-
-      if (response.ok) {
-        setSuccess('Pedido criado com sucesso!');
-        setCustomerName('');
-        setOrderItems([]);
-        await loadData();
-        
-        setTimeout(() => setSuccess(null), 3000);
-      } else {
-        const errorData = await response.json();
-        setError(errorData.error || 'Erro ao criar pedido');
-      }
-    } catch (err) {
-      setError('Erro de conexão');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const updateDeliveredQty = async (orderId: string, itemId: string, deliveredQty: number) => {
-    try {
-      // Find the order and item locally to get the full order object
-      const orderToUpdate = orders.find(order => order.id === orderId);
-      if (!orderToUpdate) {
-        setError('Pedido não encontrado localmente.');
-        return;
-      }
-
-      // Create a deep copy to avoid direct state mutation
-      const updatedItems = orderToUpdate.items.map(item => 
-        item.id === itemId ? { ...item, deliveredQty: deliveredQty } : item
-      );
-
-      // Construct the payload for the external API update
-      // The external API expects the full order object with updated items
-      const payload = {
-        row_number: orderId, // orderId is the row_number for external orders
-        items: updatedItems, // Send the entire updated items array
-        customerName: orderToUpdate.customerName, // Include customerName
-        status: orderToUpdate.status // Include current status (will be recalculated by external API)
-      };
-
-      const response = await fetch('/api/orders/update', {
-        method: 'PATCH', // Will change app/api/orders/update/route.ts to PATCH
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      if (response.ok) {
-        setSuccess('Quantidade entregue atualizada com sucesso!');
-        await loadData(); // Reload all data to reflect changes
-        setTimeout(() => setSuccess(null), 3000);
-      } else {
-        const errorData = await response.json();
-        setError(errorData.error || 'Erro ao atualizar quantidade entregue');
-      }
-    } catch (err) {
-      setError('Erro de conexão');
-    }
-  };
-
-  const formatTime = (date: Date): string => {
-    return new Date(date).toLocaleTimeString('pt-BR', {
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
-
-  const refreshData = async () => {
-    try {
-      setLoading(true);
-      
-      // Trigger manual revalidation
-      await fetch('/api/revalidate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tags: ['external-inventory', 'external-products', 'external-orders']
-        })
-      });
-      
-      // Reload data
-      await loadData();
-      setSuccess('Dados atualizados com sucesso!');
-      setTimeout(() => setSuccess(null), 3000);
-    } catch (err) {
-      setError('Erro ao atualizar dados');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const deleteOrder = async (orderId: string, customerName: string) => {
-    if (!window.confirm(`Tem certeza que deseja excluir o pedido de ${customerName}?`)) {
-      return;
-    }
-
-    try {
-      const response = await fetch(`/api/orders/${orderId}`, {
-        method: 'DELETE'
-      });
-
-      if (response.ok) {
-        setSuccess('Pedido excluído com sucesso!');
-        await loadData();
-        setTimeout(() => setSuccess(null), 3000);
-      } else {
-        const errorData = await response.json();
-        setError(errorData.error || 'Erro ao excluir pedido');
-      }
-    } catch (err) {
-      setError('Erro de conexão');
-    }
-  };
-
-  const updateOrder = async (orderId: string, updatedData: { customerName: string; items: NewOrderItem[] }) => {
-    try {
-      const response = await fetch(`/api/orders/${orderId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          customerName: updatedData.customerName.trim(),
-          items: updatedData.items
-        })
-      });
-
-      if (response.ok) {
-        setSuccess('Pedido atualizado com sucesso!');
-        await loadData();
-        setTimeout(() => setSuccess(null), 3000);
-        return true;
-      } else {
-        const errorData = await response.json();
-        setError(errorData.error || 'Erro ao atualizar pedido');
-        return false;
-      }
-    } catch (err) {
-      setError('Erro de conexão');
-      return false;
-    }
-  };
-
-  // Edit modal functions
-  const openEditModal = (order: Order) => {
-    setEditingOrder(order);
-    setEditCustomerName(order.customerName);
-    
-    console.log('app/page: Order items in openEditModal:', order.items);
-
-    const editItems: NewOrderItem[] = order.items.map(item => {
-      const availableStock = getAvailableStock(item.flavor as SkewerFlavor);
-      console.log(`app/page: Edit Modal Item - Flavor: ${item.flavor}, Qty in Order: ${item.qty}, Available Stock: ${availableStock}`);
-      return {
-        type: item.type,
-        flavor: item.flavor,
-        beverage: item.beverage,
-        qty: item.qty
-      };
-    });
-    
-    setEditOrderItems(editItems);
-    setEditModalOpen(true);
-  };
-
-  const closeEditModal = () => {
-    setEditModalOpen(false);
-    setEditingOrder(null);
-    setEditCustomerName('');
-    setEditOrderItems([]);
-  };
-
-  const addEditSkewerItem = () => {
-    const defaultFlavor = flavors.length > 0 ? flavors[0] : 'Carne';
-    setEditOrderItems([...editOrderItems, { type: 'skewer', flavor: defaultFlavor, qty: 1 }]);
-  };
-
-  const addEditBeverageItem = () => {
-    const defaultBeverage = beverages.length > 0 ? beverages[0] : 'Coca-Cola';
-    setEditOrderItems([...editOrderItems, { type: 'beverage', beverage: defaultBeverage, qty: 1 }]);
-  };
-
-  const removeEditItem = (index: number) => {
-    setEditOrderItems(editOrderItems.filter((_, i) => i !== index));
-  };
-
-  const updateEditItem = (index: number, updates: Partial<NewOrderItem>) => {
-    const newItems = [...editOrderItems];
-    newItems[index] = { ...newItems[index], ...updates };
-    setEditOrderItems(newItems);
-  };
-
-  const canSubmitEditOrder = (): boolean => {
-    if (!editCustomerName.trim() || editOrderItems.length === 0) return false;
-    
-    // Check if all skewer items have available stock
-    return editOrderItems.every(item => {
-      if (item.type === 'skewer' && item.flavor) {
-        return getAvailableStock(item.flavor) >= item.qty;
-      }
-      return true;
-    });
-  };
-
-  const submitEditOrder = async () => {
-    if (!editingOrder || !canSubmitEditOrder()) return;
-
-    try {
-      setSubmitting(true);
-      setError(null);
-
-      const success = await updateOrder(editingOrder.id, {
-        customerName: editCustomerName,
-        items: editOrderItems
-      });
-
-      if (success) {
-        closeEditModal();
-      }
-    } catch (err) {
-      setError('Erro de conexão');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
   if (loading) {
     return (
       <div className="d-flex justify-content-center align-items-center" style={{ height: '50vh' }}>
@@ -392,496 +230,66 @@ export default function HomePage() {
   }
 
   return (
-    <Row>
-      <Col lg={8}>
-        {/* New Order Form */}
-        <Card className="mb-4">
-          <CardHeader>
+    <div className="container-fluid py-4">
+      <Row className="mb-4">
+        <Col>
+          <h1>Painel de Pedidos</h1>
+        </Col>
+      </Row>
+
+      {success && <Alert color="success" fade timeout={150}>{success}</Alert>}
+      {error && <Alert color="danger" fade timeout={150}>{error}</Alert>}
+
+      <Row className="mb-4">
+        <Col lg="8">
+          <InventoryPanel
+            inventory={inventory}
+            onOpenUpdateModal={openUpdateInventoryModal}
+            onRefreshData={forceRefreshData}
+            lastSync={lastSync}
+            dataSource={dataSource}
+            loading={loading}
+          />
+        </Col>
+        <Col lg="4" className="d-flex align-items-end justify-content-end">
+          <Button color="primary" onClick={openCreateOrderModal}>
             <Icon icon="mdi:plus" className="me-2" />
             Novo Pedido
-          </CardHeader>
-          <CardBody>
-            {error && <Alert color="danger">{error}</Alert>}
-            {success && <Alert color="success">{success}</Alert>}
-
-            <Form>
-              <FormGroup>
-                <Label for="customerName">Nome do Cliente *</Label>
-                <Input
-                  id="customerName"
-                  value={customerName}
-                  onChange={(e) => setCustomerName(e.target.value)}
-                  placeholder="Digite o nome do cliente"
-                />
-              </FormGroup>
-
-              {/* Order Items */}
-              <div className="mb-3">
-                <Label className="fw-bold">Itens do Pedido</Label>
-                
-                {orderItems.map((item, index) => (
-                  <div key={index} className="order-item">
-                    <Row className="align-items-center">
-                      <Col md={3}>
-                        <FormGroup>
-                          <Label>Tipo</Label>
-                          <Input
-                            type="select"
-                            value={item.type}
-                            onChange={(e) => updateItem(index, { 
-                              type: e.target.value as 'skewer' | 'beverage',
-                              flavor: e.target.value === 'skewer' ? (flavors.length > 0 ? flavors[0] : 'Carne') : undefined,
-                              beverage: e.target.value === 'beverage' ? (beverages.length > 0 ? beverages[0] : 'Coca-Cola') : undefined
-                            })}
-                          >
-                            <option value="skewer">Espetinho</option>
-                            <option value="beverage">Bebida</option>
-                          </Input>
-                        </FormGroup>
-                      </Col>
-                      
-                      <Col md={4}>
-                        <FormGroup>
-                          <Label>{item.type === 'skewer' ? 'Sabor' : 'Bebida'}</Label>
-                          {item.type === 'skewer' ? (
-                            <Input
-                              type="select"
-                              value={item.flavor || ''}
-                              onChange={(e) => updateItem(index, { flavor: e.target.value as SkewerFlavor })}
-                            >
-                              {flavors.map(flavor => (
-                                <option 
-                                  key={flavor} 
-                                  value={flavor}
-                                  disabled={!isFlavorAvailable(flavor)}
-                                >
-                                  {flavor} {!isFlavorAvailable(flavor) ? '(Indisponível)' : ''}
-                                </option>
-                              ))}
-                            </Input>
-                          ) : (
-                            <Input
-                              type="select"
-                              value={item.beverage || ''}
-                              onChange={(e) => updateItem(index, { beverage: e.target.value as Beverage })}
-                            >
-                              {beverages.map(beverage => (
-                                <option key={beverage} value={beverage}>
-                                  {beverage}
-                                </option>
-                              ))}
-                            </Input>
-                          )}
-                        </FormGroup>
-                      </Col>
-                      
-                      <Col md={2}>
-                        <FormGroup>
-                          <Label>Quantidade</Label>
-                          <Input
-                            type="number"
-                            min="1"
-                            value={item.qty}
-                            onChange={(e) => updateItem(index, { qty: parseInt(e.target.value) || 1 })}
-                          />
-                        </FormGroup>
-                      </Col>
-                      
-                      <Col md={2}>
-                        {item.type === 'skewer' && item.flavor && (
-                          <div className="mt-4">
-                            <Badge 
-                              color={!isFlavorAvailable(item.flavor) ? 'danger' : isFlavorLowStock(item.flavor) ? 'warning' : 'success'}
-                              className="stock-badge"
-                            >
-                              Estoque: {getAvailableStock(item.flavor)}
-                            </Badge>
-                          </div>
-                        )}
-                      </Col>
-                      
-                      <Col md={1}>
-                        <Button
-                          color="danger"
-                          size="sm"
-                          onClick={() => removeItem(index)}
-                          className="mt-4"
-                        >
-                          <Icon icon="mdi:delete" />
-                        </Button>
-                      </Col>
-                    </Row>
-                  </div>
-                ))}
-
-                <div className="d-flex gap-2 mt-3">
-                  <Button color="outline-primary" onClick={addSkewerItem}>
-                    <Icon icon="mdi:plus" className="me-1" />
-                    Adicionar Espetinho
-                  </Button>
-                  <Button color="outline-info" onClick={addBeverageItem}>
-                    <Icon icon="mdi:plus" className="me-1" />
-                    Adicionar Bebida
-                  </Button>
-                </div>
-              </div>
-
-              <Button
-                color="primary"
-                size="lg"
-                onClick={submitOrder}
-                disabled={!canSubmitOrder() || submitting}
-                className="w-100"
-              >
-                {submitting ? (
-                  <>
-                    <Spinner size="sm" className="me-2" />
-                    Criando Pedido...
-                  </>
-                ) : (
-                  <>
-                    <Icon icon="mdi:check" className="me-2" />
-                    Criar Pedido
-                  </>
-                )}
-              </Button>
-            </Form>
-          </CardBody>
-        </Card>
-
-        {/* Orders List */}
-        <Card>
-          <CardHeader className="d-flex justify-content-between align-items-center">
-            <div>
-              <Icon icon="mdi:format-list-bulleted" className="me-2" />
-              Pedidos ({orders.length})
-            </div>
-            <Button
-              color="outline-primary"
-              size="sm"
-              onClick={loadData}
-              disabled={loading}
-            >
-              <Icon icon="mdi:refresh" className="me-1" />
-              Recarregar Pedidos
-            </Button>
-          </CardHeader>
-          <CardBody>
-            {orders.length === 0 ? (
-              <Alert color="info">
-                <Icon icon="mdi:information" className="me-2" />
-                Nenhum pedido encontrado
-              </Alert>
-            ) : (
-              <div className="orders-list">
-                {orders.map((order) => (
-                  <div
-                    key={order.id}
-                    className={`order-item ${order.status === 'entregue' ? 'order-delivered' : 'order-preparing'}`}
-                  >
-                    <Row>
-                      <Col md={6}>
-                        <h5 className="mb-2">
-                          {order.customerName}
-                          <Badge
-                            color={order.status === 'entregue' ? 'success' : 'warning'}
-                            className="ms-2"
-                          >
-                            {order.status === 'entregue' ? 'Entregue' : 'Em Preparo'}
-                          </Badge>
-                        </h5>
-                        <div className="d-flex justify-content-between align-items-center">
-                          <small className="text-muted">
-                            <Icon icon="mdi:clock" className="me-1" />
-                            {formatTime(order.createdAt)}
-                          </small>
-                          <div className="d-flex gap-2">
-                            <Button
-                              color="outline-primary"
-                              size="sm"
-                              onClick={() => openEditModal(order)}
-                              title="Editar pedido"
-                            >
-                              <Icon icon="mdi:pencil" />
-                            </Button>
-                            <Button
-                              color="outline-danger"
-                              size="sm"
-                              onClick={() => deleteOrder(order.id, order.customerName)}
-                              title="Excluir pedido"
-                            >
-                              <Icon icon="mdi:delete" />
-                            </Button>
-                          </div>
-                        </div>
-                      </Col>
-                      <Col md={6}>
-                        <Table size="sm" className="mb-0">
-                          <thead>
-                            <tr>
-                              <th>Item</th>
-                              <th>Qty</th>
-                              <th>Entregue</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {order.items.map((item) => (
-                              <tr key={item.id}>
-                                <td>
-                                  {item.type === 'skewer' ? item.flavor : item.beverage}
-                                </td>
-                                <td>{item.qty}</td>
-                                <td>
-                                  <Input
-                                    type="number"
-                                    min="0"
-                                    max={item.qty}
-                                    value={item.deliveredQty}
-                                    onChange={(e) => 
-                                      updateDeliveredQty(
-                                        order.id, 
-                                        item.id, 
-                                        parseInt(e.target.value) || 0
-                                      )
-                                    }
-                                    className="delivered-qty-input"
-                                  />
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </Table>
-                      </Col>
-                    </Row>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardBody>
-        </Card>
-      </Col>
-
-      {/* Inventory Sidebar */}
-      <Col lg={4}>
-        <Card className="inventory-card">
-          <CardHeader className="d-flex justify-content-between align-items-center">
-            <div>
-              <Icon icon="mdi:package-variant" className="me-2" />
-              Estoque Atual
-            </div>
-            {lastSync && (
-              <div className="d-flex gap-1">
-                <Badge color={dataSource === 'external' ? 'success' : 'secondary'} className="small">
-                  <Icon icon={dataSource === 'external' ? 'mdi:cloud-check' : 'mdi:database'} className="me-1" />
-                  {dataSource === 'external' ? 'API' : 'Local'}
-                </Badge>
-                <Badge color="info" className="small">
-                  <Icon icon="mdi:sync" className="me-1" />
-                  {new Date(lastSync).toLocaleTimeString('pt-BR', { 
-                    hour: '2-digit', 
-                    minute: '2-digit' 
-                  })}
-                </Badge>
-              </div>
-            )}
-          </CardHeader>
-          <CardBody>
-            <Table className="mb-0">
-              <thead>
-                <tr>
-                  <th>Sabor</th>
-                  <th>Quantidade</th>
-                </tr>
-              </thead>
-              <tbody>
-                {inventory.map((item) => (
-                  <tr key={item.flavor}>
-                    <td>{item.flavor}</td>
-                    <td>
-                      <Badge
-                        color={
-                          item.quantity === 0 ? 'danger' :
-                          item.quantity < 5 ? 'warning' : 'success'
-                        }
-                      >
-                        {item.quantity}
-                      </Badge>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
-            
-            <div className="mt-3 text-center">
-              <Button
-                color="outline-primary"
-                size="sm"
-                onClick={refreshData}
-                disabled={loading}
-              >
-                <Icon icon="mdi:refresh" className="me-1" />
-                Atualizar Dados
-              </Button>
-            </div>
-          </CardBody>
-        </Card>
-      </Col>
-
-      {/* Edit Order Modal */}
-      <Modal isOpen={editModalOpen} toggle={closeEditModal} size="lg">
-        <ModalHeader toggle={closeEditModal}>
-          <Icon icon="mdi:pencil" className="me-2" />
-          Editar Pedido - {editingOrder?.customerName}
-        </ModalHeader>
-        <ModalBody>
-          {error && <Alert color="danger">{error}</Alert>}
-          
-          <Form>
-            <FormGroup>
-              <Label for="editCustomerName">Nome do Cliente *</Label>
-              <Input
-                id="editCustomerName"
-                value={editCustomerName}
-                onChange={(e) => setEditCustomerName(e.target.value)}
-                placeholder="Digite o nome do cliente"
-              />
-            </FormGroup>
-
-            {/* Edit Order Items */}
-            <div className="mb-3">
-              <Label className="fw-bold">Itens do Pedido</Label>
-              
-              {editOrderItems.map((item, index) => (
-                <div key={index} className="order-item">
-                  <Row className="align-items-center">
-                    <Col md={3}>
-                      <FormGroup>
-                        <Label>Tipo</Label>
-                        <Input
-                          type="select"
-                          value={item.type}
-                          onChange={(e) => updateEditItem(index, { 
-                            type: e.target.value as 'skewer' | 'beverage',
-                            flavor: e.target.value === 'skewer' ? (flavors.length > 0 ? flavors[0] : 'Carne') : undefined,
-                            beverage: e.target.value === 'beverage' ? (beverages.length > 0 ? beverages[0] : 'Coca-Cola') : undefined
-                          })}
-                        >
-                          <option value="skewer">Espetinho</option>
-                          <option value="beverage">Bebida</option>
-                        </Input>
-                      </FormGroup>
-                    </Col>
-                    
-                    <Col md={4}>
-                      <FormGroup>
-                        <Label>{item.type === 'skewer' ? 'Sabor' : 'Bebida'}</Label>
-                        {item.type === 'skewer' ? (
-                          <Input
-                            type="select"
-                            value={item.flavor || ''}
-                            onChange={(e) => updateEditItem(index, { flavor: e.target.value as SkewerFlavor })}
-                          >
-                            {flavors.map(flavor => (
-                              <option 
-                                key={flavor} 
-                                value={flavor}
-                                disabled={!isFlavorAvailable(flavor)}
-                              >
-                                {flavor} {!isFlavorAvailable(flavor) ? '(Indisponível)' : ''}
-                              </option>
-                            ))}
-                          </Input>
-                        ) : (
-                          <Input
-                            type="select"
-                            value={item.beverage || ''}
-                            onChange={(e) => updateEditItem(index, { beverage: e.target.value as Beverage })}
-                          >
-                            {beverages.map(beverage => (
-                              <option key={beverage} value={beverage}>
-                                {beverage}
-                              </option>
-                            ))}
-                          </Input>
-                        )}
-                      </FormGroup>
-                    </Col>
-                    
-                    <Col md={2}>
-                      <FormGroup>
-                        <Label>Quantidade</Label>
-                        <Input
-                          type="number"
-                          min="1"
-                          value={item.qty}
-                          onChange={(e) => updateEditItem(index, { qty: parseInt(e.target.value) || 1 })}
-                        />
-                      </FormGroup>
-                    </Col>
-                    
-                    <Col md={2}>
-                      {item.type === 'skewer' && item.flavor && (
-                        <div className="mt-4">
-                          <Badge 
-                            color={!isFlavorAvailable(item.flavor) ? 'danger' : isFlavorLowStock(item.flavor) ? 'warning' : 'success'}
-                            className="stock-badge"
-                          >
-                            Estoque: {getAvailableStock(item.flavor)}
-                          </Badge>
-                        </div>
-                      )}
-                    </Col>
-                    
-                    <Col md={1}>
-                      <Button
-                        color="danger"
-                        size="sm"
-                        onClick={() => removeEditItem(index)}
-                        className="mt-4"
-                      >
-                        <Icon icon="mdi:delete" />
-                      </Button>
-                    </Col>
-                  </Row>
-                </div>
-              ))}
-
-              <div className="d-flex gap-2 mt-3">
-                <Button color="outline-primary" onClick={addEditSkewerItem}>
-                  <Icon icon="mdi:plus" className="me-1" />
-                  Adicionar Espetinho
-                </Button>
-                <Button color="outline-info" onClick={addEditBeverageItem}>
-                  <Icon icon="mdi:plus" className="me-1" />
-                  Adicionar Bebida
-                </Button>
-              </div>
-            </div>
-          </Form>
-        </ModalBody>
-        <ModalFooter>
-          <Button color="secondary" onClick={closeEditModal}>
-            Cancelar
           </Button>
-          <Button
-            color="primary"
-            onClick={submitEditOrder}
-            disabled={!canSubmitEditOrder() || submitting}
-          >
-            {submitting ? (
-              <>
-                <Spinner size="sm" className="me-2" />
-                Atualizando...
-              </>
-            ) : (
-              <>
-                <Icon icon="mdi:check" className="me-2" />
-                Salvar Alterações
-              </>
-            )}
-          </Button>
-        </ModalFooter>
-      </Modal>
-    </Row>
+        </Col>
+      </Row>
+
+      <KanbanBoard
+        orders={orders}
+        onOrderDrop={handleOrderDrop}
+        onOpenEditOrderModal={openEditOrderModal}
+        onOpenDeleteConfirmModal={openDeleteConfirmModal}
+      />
+
+      <OrderModal
+        isOpen={orderModalOpen}
+        toggle={() => setOrderModalOpen(false)} // Changed to directly close the modal
+        order={orderToEdit}
+        flavors={flavors}
+        beverages={beverages}
+        inventory={inventory}
+        onOrderSaved={closeOrderModal} // This callback will handle post-save actions including closing
+      />
+
+      <DeleteConfirmModal
+        isOpen={deleteConfirmModalOpen}
+        toggle={closeDeleteConfirmModal}
+        onConfirm={handleDeleteOrderConfirm}
+        title="Excluir Pedido"
+        message={`Tem certeza que deseja excluir o pedido de ${orderToDelete?.customerName || ''}?`}
+      />
+
+      <UpdateInventoryModal
+        isOpen={updateInventoryModalOpen}
+        toggle={closeUpdateInventoryModal}
+        inventory={inventory}
+        onInventoryUpdated={loadData}
+      />
+    </div>
   );
 }

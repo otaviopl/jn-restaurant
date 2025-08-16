@@ -1,6 +1,16 @@
 import { promises as fs } from 'fs';
 import path from 'path';
-import { fetchExternalOrders, fetchExternalInventory } from './external-data';
+import {
+  fetchExternalOrders,
+  fetchExternalInventory,
+  sendInventoryUpdate,
+  sendCreateOrder,
+  sendUpdateOrder,
+  sendDeleteOrder,
+  sendUpdateOrderItem,
+  sendDeleteOrderItem
+} from './external-data';
+import { ItemStatus } from '../types/order'; // Import ItemStatus
 
 // --- TYPES ---
 export type SkewerFlavor = string;
@@ -13,13 +23,14 @@ export interface OrderItem {
   beverage?: Beverage;
   qty: number;
   deliveredQty: number;
+  status?: ItemStatus; // Added new status field
 }
 
 export interface Order {
   id: string;
   customerName: string;
   items: OrderItem[];
-  status: 'em_preparo' | 'entregue';
+  status: 'em_preparo' | 'entregue' | 'todo' | 'in_progress' | 'done' | 'canceled';
   createdAt: Date;
   source: 'local' | 'external';
   modified?: boolean;
@@ -53,7 +64,7 @@ const db = {
     try {
       const fileContent = await fs.readFile(dbPath, 'utf-8');
       memoryCache = JSON.parse(fileContent);
-      console.log('lib/store: Inventory after db.read() from file:', memoryCache.inventory);
+      
       return memoryCache!;
     } catch (error: any) {
       if (error.code === 'ENOENT') {
@@ -74,7 +85,7 @@ const db = {
         };
         await db.write(initialData);
         memoryCache = initialData;
-        console.log('lib/store: Inventory after db.read() (ENOENT, initialData):', memoryCache.inventory);
+        
         return initialData;
       }
       throw error;
@@ -118,9 +129,27 @@ function generateId(prefix = 'local'): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
-function calculateOrderStatus(order: Order): 'em_preparo' | 'entregue' {
+function calculateOrderStatus(order: Order): 'todo' | 'in_progress' | 'done' | 'canceled' {
+  // If the order is explicitly 'todo', keep it 'todo'.
+  if (order.status === 'todo') {
+    return 'todo';
+  }
+
+  // If the order already has a new Kanban status (other than 'todo'), keep it.
+  if (['in_progress', 'done', 'canceled'].includes(order.status)) {
+    return order.status as 'in_progress' | 'done' | 'canceled';
+  }
+
+  // Map old statuses to new Kanban statuses.
   const allDelivered = order.items.every(item => item.deliveredQty >= item.qty);
-  return allDelivered ? 'entregue' : 'em_preparo';
+
+  if (order.status === 'entregue') {
+    return 'done';
+  }
+  
+  // For 'em_preparo' or any other non-Kanban status, determine based on delivery.
+  // This also acts as a fallback for any unexpected status.
+  return allDelivered ? 'done' : 'in_progress';
 }
 
 // Helper to adjust inventory quantity with validation
@@ -146,7 +175,7 @@ async function adjustInventoryQuantity(
 // --- INVENTORY MANAGEMENT ---
 export async function getInventory(): Promise<InventoryItem[]> {
   const { inventory } = await db.read();
-  console.log('lib/store: getInventory() returning:', inventory);
+  
   return inventory;
 }
 
@@ -163,6 +192,13 @@ export async function updateInventory(updates: Partial<Record<SkewerFlavor, numb
     }
   });
   await db.write(dbData);
+
+  // Send update to external API
+  try {
+    await sendInventoryUpdate(updates);
+  } catch (error) {
+    console.error('Failed to send inventory update to external API:', error);
+  }
 }
 
 // --- ORDER MANAGEMENT ---
@@ -170,7 +206,10 @@ export async function listOrders(): Promise<Order[]> {
   const { orders } = await db.read();
   return orders.map(order => ({
     ...order,
-    status: calculateOrderStatus(order)
+    // Only calculate status if it's still using old format
+    status: ['todo', 'in_progress', 'done', 'canceled'].includes(order.status) 
+      ? order.status 
+      : calculateOrderStatus(order)
   }));
 }
 
@@ -178,7 +217,13 @@ export async function getOrder(orderId: string): Promise<Order | null> {
   const { orders } = await db.read();
   const order = orders.find(o => o.id === orderId);
   if (!order) return null;
-  return { ...order, status: calculateOrderStatus(order) };
+  return { 
+    ...order, 
+    // Only calculate status if it's still using old format
+    status: ['todo', 'in_progress', 'done', 'canceled'].includes(order.status) 
+      ? order.status 
+      : calculateOrderStatus(order)
+  };
 }
 
 export async function createOrder(
@@ -187,11 +232,14 @@ export async function createOrder(
 ): Promise<{ success: boolean; message?: string; order?: Order }> {
   const dbData = await db.read();
 
-  // Adjust stock
+  // Adjust stock - collect all results first
+  const inventoryAdjustmentResults: { success: boolean; message?: string }[] = [];
   for (const item of items) {
     if (item.type === 'skewer' && item.flavor) {
       const result = await adjustInventoryQuantity(dbData, item.flavor, item.qty);
+      inventoryAdjustmentResults.push(result);
       if (!result.success) {
+        // If any adjustment fails, return immediately without creating the order
         return { success: false, message: result.message };
       }
     }
@@ -205,13 +253,20 @@ export async function createOrder(
       id: generateId('item'),
       deliveredQty: 0
     })),
-    status: 'em_preparo',
+    status: 'todo', // New orders start as 'todo'
     createdAt: new Date(),
     source: 'local'
   };
 
   dbData.orders.push(newOrder);
-  await db.write(dbData);
+  await db.write(dbData); // Only write if all inventory adjustments were successful
+
+  // Send to external API
+  try {
+    await sendCreateOrder(newOrder);
+  } catch (error) {
+    console.error('Failed to send new order to external API:', error);
+  }
 
   return { success: true, order: newOrder };
 }
@@ -221,7 +276,7 @@ export async function updateOrder(
   updates: {
     customerName?: string;
     items?: Omit<OrderItem, 'id' | 'deliveredQty'>[];
-    status?: 'em_preparo' | 'entregue';
+    status?: 'em_preparo' | 'entregue' | 'todo' | 'in_progress' | 'done' | 'canceled';
   }
 ): Promise<{ success: boolean; message?: string; order?: Order }> {
   const dbData = await db.read();
@@ -287,17 +342,30 @@ export async function updateOrder(
     order.customerName = updates.customerName;
   }
 
-  // Update status or recalculate it
+  // Update status only if explicitly provided
   if (updates.status) {
     order.status = updates.status;
-  } else {
-    order.status = calculateOrderStatus(order);
   }
+  // Do NOT recalculate status automatically to preserve Kanban state
   
-  order.modified = order.source === 'external';
+  order.modified = true; // Mark as modified if any update occurs
   dbData.orders[orderIndex] = order;
 
   await db.write(dbData);
+
+  // Send update to external API
+  try {
+    // Create external updates, excluding items if present to avoid type mismatch
+    const { items: _, ...safeUpdates } = updates;
+    const externalUpdates: Partial<Order> = {
+      ...safeUpdates,
+      ...(updates.items && { items: order.items }) // Use the complete items array if items were updated
+    };
+    await sendUpdateOrder(orderId, externalUpdates);
+  } catch (error) {
+    console.error('Failed to send order update to external API:', error);
+  }
+
   return { success: true, order };
 }
 
@@ -311,6 +379,13 @@ export async function deleteOrder(orderId: string): Promise<{ success: boolean; 
 
   const [deletedOrder] = dbData.orders.splice(orderIndex, 1);
   await db.write(dbData);
+
+  // Send delete to external API
+  try {
+    await sendDeleteOrder(orderId);
+  } catch (error) {
+    console.error('Failed to send order deletion to external API:', error);
+  }
 
   return { success: true, order: deletedOrder };
 }
@@ -355,9 +430,17 @@ export async function updateOrderItem(
     }
 
     order.status = calculateOrderStatus(order);
-    order.modified = order.source === 'external';
+    order.modified = true; // Mark as modified if any update occurs
 
     await db.write(dbData);
+
+    // Send update to external API
+    try {
+        await sendUpdateOrderItem(orderId, itemId, updates);
+    } catch (error) {
+        console.error('Failed to send order item update to external API:', error);
+    }
+
     return { success: true, item };
 }
 
@@ -391,9 +474,17 @@ export async function deleteOrderItem(orderId: string, itemId: string): Promise<
     }
 
     order.status = calculateOrderStatus(order);
-    order.modified = order.source === 'external';
+    order.modified = true; // Mark as modified if any update occurs
 
     await db.write(dbData);
+
+    // Send delete to external API
+    try {
+        await sendDeleteOrderItem(orderId, itemId);
+    } catch (error) {
+        console.error('Failed to send order item deletion to external API:', error);
+    }
+
     return { success: true, item: deletedItem };
 }
 

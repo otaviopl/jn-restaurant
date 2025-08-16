@@ -206,10 +206,10 @@ export default function InventoryPage() {
             )}
           </CardHeader>
           <CardBody>
-            {error && <Alert color="danger">{error}</Alert>}
-            {success && <Alert color="success">{success}</Alert>}
-            
-            <Alert color="info" className="mb-3">
+                        {error && <Alert color="danger" fade timeout={150}>{error}</Alert>}
+            {success && <Alert color="success" fade timeout={150}>{success}</Alert>}
+
+            <Alert color="info" className="mb-3" fade={false}>
               <Icon icon="mdi:cloud-sync" className="me-2" />
               <strong>Sincronização Externa:</strong> As alterações no estoque são automaticamente enviadas para o sistema externo quando salvas.
             </Alert>

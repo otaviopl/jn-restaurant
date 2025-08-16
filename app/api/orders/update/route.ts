@@ -3,6 +3,25 @@ import { NextRequest, NextResponse } from 'next/server';
 const EXTERNAL_ORDER_UPDATE_URL = process.env.EXTERNAL_ORDER_UPDATE_URL;
 const API_KEY = process.env.EXTERNAL_API_KEY;
 
+// Map internal Kanban status to external API format
+function mapStatusToExternal(status: string): string {
+  switch (status) {
+    case 'todo':
+      return 'A fazer';
+    case 'in_progress':
+    case 'em_preparo':
+      return 'Em preparo';
+    case 'done':
+    case 'entregue':
+      return 'Entregue';
+    case 'canceled':
+      return 'Cancelado';
+    default:
+      console.warn(`Unknown status: ${status}, defaulting to 'Em preparo'`);
+      return 'Em preparo';
+  }
+}
+
 export async function PATCH(request: NextRequest) {
   try {
     const body = await request.json();
@@ -47,10 +66,10 @@ export async function PATCH(request: NextRequest) {
       row_number: row_number,
       itens: itemsString,
       cliente: customerName || undefined,
-      situacao: status ? (status === 'em_preparo' ? 'Em preparo' : 'Entregue') : undefined
+      situacao: status ? mapStatusToExternal(status) : undefined
     }];
 
-    console.log('Enviando atualização para API externa:', payload);
+    
 
     const response = await fetch(EXTERNAL_ORDER_UPDATE_URL, {
       method: 'PUT',
