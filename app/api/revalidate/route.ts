@@ -1,70 +1,47 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { revalidateTag, revalidatePath } from 'next/cache';
+import { revalidateTag } from 'next/cache';
+import { fetchExternalInventory, fetchExternalOrders } from '@/lib/external-data';
+import { syncInventoryFromExternal, syncOrdersFromExternal } from '@/lib/store';
 
 export async function POST(request: NextRequest) {
   try {
-    const { tags, paths, type } = await request.json();
+    // Step 1: Invalidate the Next.js cache for external data.
+    // This ensures that subsequent calls to fetchExternal... get fresh data.
+    revalidateTag('external-inventory');
+    revalidateTag('external-orders');
+    revalidateTag('external-products');
 
-    let revalidatedItems: string[] = [];
+    // Step 2: Fetch the latest data directly from the external APIs.
+    const [inventory, orders] = await Promise.all([
+      fetchExternalInventory(),
+      fetchExternalOrders(),
+    ]);
 
-    // Revalidate specific tags
-    if (tags && Array.isArray(tags)) {
-      for (const tag of tags) {
-        revalidateTag(tag);
-        revalidatedItems.push(`tag:${tag}`);
-      }
+    // Step 3: Overwrite the local db.json with the fresh data.
+    // This ensures the local database is a mirror of the external source of truth.
+    if (inventory) {
+      await syncInventoryFromExternal(inventory);
+      console.log('Successfully synced inventory from external API.');
     }
-
-    // Revalidate specific paths
-    if (paths && Array.isArray(paths)) {
-      for (const path of paths) {
-        revalidatePath(path, type || 'page');
-        revalidatedItems.push(`path:${path}`);
-      }
-    }
-
-    // Default: revalidate external data
-    if (!tags && !paths) {
-      revalidateTag('external-inventory');
-      revalidateTag('external-products');
-      revalidatedItems.push('tag:external-inventory', 'tag:external-products');
+    if (orders) {
+      // We need a more robust sync for orders to not lose local modifications.
+      // For now, we do a simple overwrite as requested.
+      await syncOrdersFromExternal(orders);
+      console.log('Successfully synced orders from external API.');
     }
 
     return NextResponse.json({
       success: true,
-      revalidated: revalidatedItems,
-      timestamp: new Date().toISOString()
+      revalidated: ['tag:external-inventory', 'tag:external-orders'],
+      synced: true,
+      timestamp: new Date().toISOString(),
     });
 
   } catch (error) {
-    console.error('Revalidation error:', error);
+    console.error('Revalidation and Sync error:', error);
     return NextResponse.json(
-      { error: 'Erro ao revalidar cache' },
+      { error: 'Erro ao revalidar e sincronizar dados' },
       { status: 500 }
     );
   }
-}
-
-export async function GET() {
-  return NextResponse.json({
-    description: 'Manual cache revalidation endpoint',
-    usage: {
-      method: 'POST',
-      body: {
-        tags: ['external-inventory', 'external-products'],
-        paths: ['/api/inventory', '/api/products'],
-        type: 'page | layout'
-      }
-    },
-    availableTags: [
-      'external-inventory',
-      'external-products',
-      'external-inventory-realtime'
-    ],
-    availablePaths: [
-      '/api/inventory',
-      '/api/products',
-      '/'
-    ]
-  });
 }

@@ -1,4 +1,8 @@
-// Types - Now dynamic, no longer hardcoded
+import { promises as fs } from 'fs';
+import path from 'path';
+import { fetchExternalOrders, fetchExternalInventory } from './external-data';
+
+// --- TYPES ---
 export type SkewerFlavor = string;
 export type Beverage = string;
 
@@ -17,26 +21,71 @@ export interface Order {
   items: OrderItem[];
   status: 'em_preparo' | 'entregue';
   createdAt: Date;
+  source: 'local' | 'external';
+  modified?: boolean;
 }
 
 export interface InventoryItem {
   flavor: SkewerFlavor;
   quantity: number;
-  initialQuantity?: number; // Optional: quantidade inicial do estoque
+  initialQuantity?: number;
 }
 
-// In-memory state
-let orders: Order[] = [];
-let inventory: InventoryItem[] = [];
+interface DbData {
+  orders: Order[];
+  inventory: InventoryItem[];
+  products: {
+    flavors: SkewerFlavor[];
+    beverages: Beverage[];
+  }
+}
 
-// Dynamic products - now truly dynamic based on external data
-let availableFlavors: SkewerFlavor[] = [];
-let availableBeverages: Beverage[] = ['Coca-Cola', 'Guaraná', 'Água', 'Suco']; // Default beverages
-let lastSync: Date | null = null;
+// --- DATABASE (JSON file) ---
+const dbPath = path.join(process.cwd(), 'db.json');
+let memoryCache: DbData | null = null;
 
-// Utility functions
-function generateId(): string {
-  return Math.random().toString(36).substr(2, 9);
+const db = {
+  read: async (): Promise<DbData> => {
+    if (memoryCache) {
+      return memoryCache;
+    }
+    try {
+      const fileContent = await fs.readFile(dbPath, 'utf-8');
+      memoryCache = JSON.parse(fileContent);
+      return memoryCache!;
+    } catch (error: any) {
+      if (error.code === 'ENOENT') {
+        console.log('db.json not found. Initializing from external API.');
+        const [initialOrders, initialInventory] = await Promise.all([
+          fetchExternalOrders(),
+          fetchExternalInventory()
+        ]);
+
+        const initialData: DbData = {
+          orders: initialOrders || [],
+          inventory: initialInventory || [],
+          products: {
+            flavors: initialInventory?.map(i => i.flavor) || [],
+            beverages: ['Coca-Cola', 'Guaraná', 'Água', 'Suco']
+          }
+        };
+        await db.write(initialData);
+        memoryCache = initialData;
+        return initialData;
+      }
+      throw error;
+    }
+  },
+  write: async (data: DbData) => {
+    memoryCache = data;
+    await fs.writeFile(dbPath, JSON.stringify(data, null, 2), 'utf-8');
+  }
+};
+
+
+// --- UTILITY FUNCTIONS ---
+function generateId(prefix = 'local'): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
 function calculateOrderStatus(order: Order): 'em_preparo' | 'entregue' {
@@ -44,187 +93,287 @@ function calculateOrderStatus(order: Order): 'em_preparo' | 'entregue' {
   return allDelivered ? 'entregue' : 'em_preparo';
 }
 
-// Inventory management
-export function getInventory(): InventoryItem[] {
-  return [...inventory];
+// --- INVENTORY MANAGEMENT ---
+export async function getInventory(): Promise<InventoryItem[]> {
+  const { inventory } = await db.read();
+  return inventory;
 }
 
-export function setInventory(flavor: SkewerFlavor, quantity: number): void {
-  const item = inventory.find(inv => inv.flavor === flavor);
-  if (item) {
-    item.quantity = Math.max(0, quantity);
-  }
-}
-
-export function decInventory(flavor: SkewerFlavor, quantity: number): boolean {
-  const item = inventory.find(inv => inv.flavor === flavor);
-  if (item && item.quantity >= quantity) {
-    item.quantity -= quantity;
-    return true;
-  }
-  return false;
-}
-
-export function updateInventory(updates: Partial<Record<SkewerFlavor, number>>): void {
+export async function updateInventory(updates: Partial<Record<SkewerFlavor, number>>): Promise<void> {
+  const dbData = await db.read();
   (Object.entries(updates) as [SkewerFlavor, number][]).forEach(([flavor, quantity]) => {
     if (quantity !== undefined) {
-      setInventory(flavor, quantity);
+      const item = dbData.inventory.find(inv => inv.flavor === flavor);
+      // Only update the quantity if the flavor already exists in the inventory.
+      if (item) {
+        item.quantity = Math.max(0, quantity);
+      }
+      // If the flavor is not found, it is ignored, preventing new flavors from being added.
     }
   });
+  await db.write(dbData);
 }
 
-// New function to replace entire inventory from external source
-export function replaceInventory(newInventory: InventoryItem[]): void {
-  inventory = [...newInventory];
-  
-  // Update available flavors based on inventory
-  const uniqueFlavors = [...new Set(newInventory.map(item => item.flavor))];
-  availableFlavors = uniqueFlavors;
-}
-
-// Order management
-export function listOrders(): Order[] {
+// --- ORDER MANAGEMENT ---
+export async function listOrders(): Promise<Order[]> {
+  const { orders } = await db.read();
   return orders.map(order => ({
     ...order,
     status: calculateOrderStatus(order)
   }));
 }
 
-export function createOrder(
+export async function getOrder(orderId: string): Promise<Order | null> {
+  const { orders } = await db.read();
+  const order = orders.find(o => o.id === orderId);
+  if (!order) return null;
+  return { ...order, status: calculateOrderStatus(order) };
+}
+
+export async function createOrder(
   customerName: string,
   items: Omit<OrderItem, 'id' | 'deliveredQty'>[]
-): { success: boolean; message?: string; order?: Order } {
+): Promise<{ success: boolean; message?: string; order?: Order }> {
+  const dbData = await db.read();
+
   // Validate stock
-  const skewerItems = items.filter(item => item.type === 'skewer');
-  
-  for (const item of skewerItems) {
-    if (item.flavor) {
-      const inventoryItem = inventory.find(inv => inv.flavor === item.flavor);
+  for (const item of items) {
+    if (item.type === 'skewer' && item.flavor) {
+      const inventoryItem = dbData.inventory.find(inv => inv.flavor === item.flavor);
       if (!inventoryItem || inventoryItem.quantity < item.qty) {
         return {
           success: false,
-          message: `Estoque insuficiente para ${item.flavor}. Disponível: ${inventoryItem?.quantity || 0}, Solicitado: ${item.qty}`
+          message: `Estoque insuficiente para ${item.flavor}. Disponível: ${inventoryItem?.quantity || 0}`
         };
       }
     }
   }
 
-  // Decrement inventory
-  for (const item of skewerItems) {
-    if (item.flavor) {
-      decInventory(item.flavor, item.qty);
+  // Decrement stock
+  for (const item of items) {
+    if (item.type === 'skewer' && item.flavor) {
+      const inventoryItem = dbData.inventory.find(inv => inv.flavor === item.flavor);
+      if (inventoryItem) {
+        inventoryItem.quantity -= item.qty;
+      }
     }
   }
 
-  // Create order
-  const order: Order = {
-    id: generateId(),
+  const newOrder: Order = {
+    id: generateId('local'),
     customerName,
     items: items.map(item => ({
       ...item,
-      id: generateId(),
+      id: generateId('item'),
       deliveredQty: 0
     })),
     status: 'em_preparo',
-    createdAt: new Date()
+    createdAt: new Date(),
+    source: 'local'
   };
 
-  orders.push(order);
-  
-  return { success: true, order };
+  dbData.orders.push(newOrder);
+  await db.write(dbData);
+
+  return { success: true, order: newOrder };
 }
 
-export function updateDeliveredQty(
+export async function updateOrder(
   orderId: string,
-  itemId: string,
-  deliveredQty: number
-): { success: boolean; message?: string } {
-  const order = orders.find(o => o.id === orderId);
-  if (!order) {
+  updates: {
+    customerName?: string;
+    items?: Omit<OrderItem, 'id' | 'deliveredQty'>[];
+    status?: 'em_preparo' | 'entregue';
+  }
+): Promise<{ success: boolean; message?: string; order?: Order }> {
+  const dbData = await db.read();
+  const orderIndex = dbData.orders.findIndex(o => o.id === orderId);
+
+  if (orderIndex === -1) {
     return { success: false, message: 'Pedido não encontrado' };
   }
 
-  const item = order.items.find(i => i.id === itemId);
-  if (!item) {
-    return { success: false, message: 'Item não encontrado' };
+  const order = dbData.orders[orderIndex];
+
+  // Handle item and inventory updates
+  if (updates.items) {
+    const stockChanges = new Map<SkewerFlavor, number>(); // flavor -> quantity change (+ve means take from stock, -ve means return to stock)
+
+    // Calculate changes from old items
+    order.items.forEach(oldItem => {
+      if (oldItem.type === 'skewer' && oldItem.flavor) {
+        const change = (stockChanges.get(oldItem.flavor) || 0) - oldItem.qty;
+        stockChanges.set(oldItem.flavor, change);
+      }
+    });
+
+    // Calculate changes from new items
+    updates.items.forEach(newItem => {
+      if (newItem.type === 'skewer' && newItem.flavor) {
+        const change = (stockChanges.get(newItem.flavor) || 0) + newItem.qty;
+        stockChanges.set(newItem.flavor, change);
+      }
+    });
+
+    // Validate stock before applying any changes
+    for (const [flavor, qtyChange] of stockChanges.entries()) {
+      if (qtyChange > 0) { // We need to take from stock
+        const inventoryItem = dbData.inventory.find(inv => inv.flavor === flavor);
+        if (!inventoryItem || inventoryItem.quantity < qtyChange) {
+          return {
+            success: false,
+            message: `Estoque insuficiente para ${flavor}. Disponível: ${inventoryItem?.quantity || 0}, Necessário: ${qtyChange}`
+          };
+        }
+      }
+    }
+
+    // Apply stock changes
+    for (const [flavor, qtyChange] of stockChanges.entries()) {
+      const inventoryItem = dbData.inventory.find(inv => inv.flavor === flavor);
+      if (inventoryItem) {
+        inventoryItem.quantity -= qtyChange;
+      }
+    }
+
+    // Update the order's items, preserving IDs and deliveredQty where possible
+    order.items = updates.items.map(newItem => {
+        const oldItem = order.items.find(oi => oi.flavor === newItem.flavor && oi.type === newItem.type && oi.beverage === newItem.beverage);
+        return {
+            ...newItem,
+            id: oldItem?.id || generateId('item'),
+            deliveredQty: oldItem?.deliveredQty || 0
+        };
+    });
   }
 
-  if (deliveredQty < 0 || deliveredQty > item.qty) {
-    return { 
-      success: false, 
-      message: `Quantidade entregue deve estar entre 0 e ${item.qty}` 
-    };
+  // Update customer name
+  if (updates.customerName) {
+    order.customerName = updates.customerName;
   }
 
-  item.deliveredQty = deliveredQty;
-  order.status = calculateOrderStatus(order);
-
-  return { success: true };
-}
-
-export function getOrder(orderId: string): Order | null {
-  const order = orders.find(o => o.id === orderId);
-  if (!order) return null;
+  // Update status or recalculate it
+  if (updates.status) {
+    order.status = updates.status;
+  } else {
+    order.status = calculateOrderStatus(order);
+  }
   
-  return {
-    ...order,
-    status: calculateOrderStatus(order)
-  };
+  order.modified = order.source === 'external';
+  dbData.orders[orderIndex] = order;
+
+  await db.write(dbData);
+  return { success: true, order };
 }
 
-// Products management
-export function getAvailableFlavors(): SkewerFlavor[] {
-  return [...availableFlavors];
-}
+export async function deleteOrder(orderId: string): Promise<{ success: boolean; message?: string; order?: Order }> {
+  const dbData = await db.read();
+  const orderIndex = dbData.orders.findIndex(o => o.id === orderId);
 
-export function getAvailableBeverages(): Beverage[] {
-  return [...availableBeverages];
-}
-
-export function updateAvailableProducts(
-  flavors?: SkewerFlavor[],
-  beverages?: Beverage[]
-): void {
-  if (flavors && Array.isArray(flavors)) {
-    availableFlavors = [...flavors];
+  if (orderIndex === -1) {
+    return { success: false, message: 'Pedido não encontrado' };
   }
-  
-  if (beverages && Array.isArray(beverages)) {
-    availableBeverages = [...beverages];
-  }
-  
-  lastSync = new Date();
+
+  const [deletedOrder] = dbData.orders.splice(orderIndex, 1);
+  await db.write(dbData);
+
+  return { success: true, order: deletedOrder };
 }
 
-export function getProductsInfo(): {
-  flavors: SkewerFlavor[];
-  beverages: Beverage[];
-  lastSync: Date | null;
-} {
-  return {
-    flavors: getAvailableFlavors(),
-    beverages: getAvailableBeverages(),
-    lastSync
-  };
+// --- ORDER ITEM MANAGEMENT ---
+export async function updateOrderItem(
+  orderId: string,
+  itemId: string,
+  updates: Partial<Pick<OrderItem, 'qty' | 'deliveredQty'>>
+): Promise<{ success: boolean; message?: string; item?: OrderItem }> {
+    const dbData = await db.read();
+    const order = dbData.orders.find(o => o.id === orderId);
+
+    if (!order) {
+        return { success: false, message: 'Pedido não encontrado' };
+    }
+
+    const item = order.items.find(i => i.id === itemId);
+    if (!item) {
+        return { success: false, message: 'Item não encontrado' };
+    }
+
+    // Handle inventory changes if quantity is updated
+    if (updates.qty !== undefined && item.type === 'skewer' && item.flavor) {
+        const qtyDifference = updates.qty - item.qty;
+        const inventoryItem = dbData.inventory.find(inv => inv.flavor === item.flavor);
+
+        if (!inventoryItem) {
+            return { success: false, message: `Sabor de espeto "${item.flavor}" não encontrado no inventário.` };
+        }
+
+        if (qtyDifference > inventoryItem.quantity) {
+            return { success: false, message: `Estoque insuficiente para ${item.flavor}. Apenas ${inventoryItem.quantity} disponível.` };
+        }
+        inventoryItem.quantity -= qtyDifference;
+    }
+
+    if (updates.qty !== undefined) {
+        item.qty = updates.qty;
+    }
+    if (updates.deliveredQty !== undefined) {
+        if (updates.deliveredQty > item.qty) {
+            return { success: false, message: 'Quantidade entregue não pode ser maior que a quantidade do item.' };
+        }
+        item.deliveredQty = updates.deliveredQty;
+    }
+
+    order.status = calculateOrderStatus(order);
+    order.modified = order.source === 'external';
+
+    await db.write(dbData);
+    return { success: true, item };
 }
 
-// Sync management
-export function getLastSyncTime(): Date | null {
-  return lastSync;
+export async function deleteOrderItem(orderId: string, itemId: string): Promise<{ success: boolean; message?: string; item?: OrderItem }> {
+    const dbData = await db.read();
+    const order = dbData.orders.find(o => o.id === orderId);
+
+    if (!order) {
+        return { success: false, message: 'Pedido não encontrado' };
+    }
+    
+    if (order.items.length <= 1) {
+        return { success: false, message: 'Não é possível remover o último item de um pedido.' };
+    }
+
+    const itemIndex = order.items.findIndex(i => i.id === itemId);
+    if (itemIndex === -1) {
+        return { success: false, message: 'Item não encontrado' };
+    }
+
+    const [deletedItem] = order.items.splice(itemIndex, 1);
+
+    // Restore inventory
+    if (deletedItem.type === 'skewer' && deletedItem.flavor) {
+        const inventoryItem = dbData.inventory.find(inv => inv.flavor === deletedItem.flavor);
+        if (inventoryItem) {
+            inventoryItem.quantity += deletedItem.qty;
+        }
+    }
+
+    order.status = calculateOrderStatus(order);
+    order.modified = order.source === 'external';
+
+    await db.write(dbData);
+    return { success: true, item: deletedItem };
 }
 
-export function markSyncTime(): void {
-  lastSync = new Date();
+
+// --- SYNC FUNCTIONS ---
+export async function syncOrdersFromExternal(externalOrders: Order[]): Promise<void> {
+  const dbData = await db.read();
+  dbData.orders = externalOrders;
+  await db.write(dbData);
 }
 
-// Enhanced inventory functions with sync support
-export function syncInventoryFromWebhook(updates: Partial<Record<SkewerFlavor, number>>): void {
-  updateInventory(updates);
-  markSyncTime();
-}
-
-// New function to sync entire inventory from external source
-export function syncInventoryFromExternal(newInventory: InventoryItem[]): void {
-  replaceInventory(newInventory);
-  markSyncTime();
+export async function syncInventoryFromExternal(externalInventory: InventoryItem[]): Promise<void> {
+  const dbData = await db.read();
+  dbData.inventory = externalInventory;
+  await db.write(dbData);
 }

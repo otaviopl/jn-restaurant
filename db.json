@@ -1,0 +1,114 @@
+{
+  "orders": [
+    {
+      "id": "2",
+      "customerName": "otávio",
+      "items": [
+        {
+          "id": "external-1755347987413-c2pjlxeko",
+          "type": "beverage",
+          "beverage": "coca-cola",
+          "qty": 1,
+          "deliveredQty": 0
+        }
+      ],
+      "status": "em_preparo",
+      "createdAt": "2025-08-16T12:39:47.413Z",
+      "source": "external",
+      "modified": false
+    },
+    {
+      "id": "3",
+      "customerName": "otávio",
+      "items": [
+        {
+          "type": "skewer",
+          "flavor": "Carne",
+          "qty": 1,
+          "id": "item-1755348210813-ang0jza2q",
+          "deliveredQty": 0
+        }
+      ],
+      "status": "em_preparo",
+      "createdAt": "2025-08-16T12:39:47.413Z",
+      "source": "external",
+      "modified": true
+    },
+    {
+      "id": "local-1755348187487-8apwlwqy0",
+      "customerName": "otávio",
+      "items": [
+        {
+          "type": "skewer",
+          "flavor": "Carne",
+          "qty": 1,
+          "id": "item-1755348187487-bs1i5imto",
+          "deliveredQty": 0
+        }
+      ],
+      "status": "em_preparo",
+      "createdAt": "2025-08-16T12:43:07.487Z",
+      "source": "local"
+    }
+  ],
+  "inventory": [
+    {
+      "flavor": "Carne",
+      "quantity": 40,
+      "initialQuantity": 45
+    },
+    {
+      "flavor": "Misto",
+      "quantity": 30,
+      "initialQuantity": 30
+    },
+    {
+      "flavor": "Coração",
+      "quantity": 25,
+      "initialQuantity": 25
+    },
+    {
+      "flavor": "Pão de Alho",
+      "quantity": 10,
+      "initialQuantity": 10
+    },
+    {
+      "flavor": "Quejio",
+      "quantity": 31,
+      "initialQuantity": 35
+    },
+    {
+      "flavor": "Medalhão Mandioca",
+      "quantity": 25,
+      "initialQuantity": 25
+    },
+    {
+      "flavor": "Medalhão Frango",
+      "quantity": 30,
+      "initialQuantity": 30
+    },
+    {
+      "flavor": "Kafta",
+      "quantity": 25,
+      "initialQuantity": 25
+    }
+  ],
+  "products": {
+    "flavors": [
+      "Carne",
+      "Misto",
+      "Coração",
+      "Pão de Alho",
+      "Quejio",
+      "Medalhão Mandioca",
+      "Medalhão Frango",
+      "Kafta"
+    ],
+    "beverages": [
+      "Coca-Cola",
+      "Guaraná",
+      "Água",
+      "Suco"
+    ]
+  }
+}

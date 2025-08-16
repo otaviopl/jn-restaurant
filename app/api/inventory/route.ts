@@ -1,44 +1,61 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getInventory, updateInventory, syncInventoryFromWebhook, syncInventoryFromExternal, SkewerFlavor } from '@/lib/store';
+import { getInventory, updateInventory, SkewerFlavor } from '@/lib/store';
 import { sendWebhook, createInventoryWebhookPayload } from '@/lib/webhook';
-import { fetchExternalInventory } from '@/lib/external-data';
+
+// External inventory update endpoint
+const EXTERNAL_INVENTORY_UPDATE_URL = process.env.EXTERNAL_INVENTORY_UPDATE_URL;
+const API_KEY = process.env.EXTERNAL_API_KEY;
+
+/**
+ * Send inventory update to external system
+ */
+async function sendInventoryUpdateToExternal(updates: Record<SkewerFlavor, number>): Promise<void> {
+  if (!EXTERNAL_INVENTORY_UPDATE_URL) {
+    console.log('EXTERNAL_INVENTORY_UPDATE_URL not configured, skipping external update');
+    return;
+  }
+
+  try {
+    console.log('Sending inventory update to external system with new format:', EXTERNAL_INVENTORY_UPDATE_URL);
+    
+    // Transform the updates object to the desired array format
+    const payload = Object.entries(updates).map(([flavor, stock]) => ({
+      "Espetinhos": flavor,
+      "Estoque": stock
+    }));
+    
+    console.log('Payload being sent:', JSON.stringify(payload, null, 2));
+    
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'User-Agent': 'JN-Burger-Backoffice/1.0.0',
+    };
+
+    if (API_KEY) {
+      headers['Authorization'] = `Bearer ${API_KEY}`;
+    }
+
+    const response = await fetch(EXTERNAL_INVENTORY_UPDATE_URL, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      console.error(`External inventory update failed: ${response.status} ${response.statusText}`);
+    }
+  } catch (error) {
+    console.error('Error sending inventory update to external system:', error);
+  }
+}
 
 export async function GET() {
   try {
-    // Try to get external inventory first
-    const externalInventory = await fetchExternalInventory();
-    
-    if (externalInventory) {
-      // Sync external data to local store (complete replacement for dynamic flavors)
-      syncInventoryFromExternal(externalInventory);
-      
-      return NextResponse.json(externalInventory, {
-        headers: {
-          'X-Data-Source': 'external',
-          'X-Cache-Status': 'fresh'
-        }
-      });
-    }
-    
-    // Fallback to local inventory
-    const inventory = getInventory();
-    return NextResponse.json(inventory, {
-      headers: {
-        'X-Data-Source': 'local',
-        'X-Cache-Status': 'fallback'
-      }
-    });
+    const inventory = await getInventory();
+    return NextResponse.json(inventory);
   } catch (error) {
     console.error('Error in inventory GET:', error);
-    
-    // Always fallback to local data on error
-    const inventory = getInventory();
-    return NextResponse.json(inventory, {
-      headers: {
-        'X-Data-Source': 'local',
-        'X-Cache-Status': 'error-fallback'
-      }
-    });
+    return NextResponse.json({ error: 'Failed to fetch inventory' }, { status: 500 });
   }
 }
 
@@ -54,32 +71,12 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
-    // Validate updates
-    for (const [flavor, quantity] of Object.entries(updates)) {
-      if (!flavor || typeof flavor !== 'string' || flavor.trim() === '') {
-        return NextResponse.json(
-          { error: `Sabor inválido: ${flavor}` },
-          { status: 400 }
-        );
-      }
-
-      if (typeof quantity !== 'number' || quantity < 0 || !Number.isInteger(quantity)) {
-        return NextResponse.json(
-          { error: `Quantidade inválida para ${flavor}: deve ser um número inteiro não negativo` },
-          { status: 400 }
-        );
-      }
-    }
-
-    updateInventory(updates);
-    const updatedInventory = getInventory();
+    await updateInventory(updates);
+    const updatedInventory = await getInventory();
     
-    // Send webhook notification for inventory update (non-blocking)
-    const webhookPayload = createInventoryWebhookPayload(updates);
-    sendWebhook(webhookPayload).catch(error => {
-      console.error('Failed to send inventory.updated webhook:', error);
-      // Don't fail the inventory update if webhook fails
-    });
+    // Non-blocking calls to external services
+    sendInventoryUpdateToExternal(updates).catch(err => console.error('Failed to send inventory update to external system:', err));
+    sendWebhook(createInventoryWebhookPayload(updates)).catch(err => console.error('Failed to send inventory.updated webhook:', err));
     
     return NextResponse.json(updatedInventory);
   } catch (error) {

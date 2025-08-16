@@ -1,7 +1,7 @@
 import { Order } from './store';
 
 export interface WebhookPayload {
-  event: 'order.created' | 'order.updated' | 'inventory.updated';
+  event: 'order.created' | 'order.updated' | 'order.deleted' | 'inventory.updated';
   timestamp: string;
   data: any;
   metadata?: {
@@ -107,7 +107,7 @@ async function generateSignature(payload: string, secret: string): Promise<strin
  * Creates webhook payload for order events
  */
 export function createOrderWebhookPayload(
-  event: 'order.created' | 'order.updated',
+  event: 'order.created' | 'order.updated' | 'order.deleted',
   order: Order
 ): WebhookPayload {
   return {

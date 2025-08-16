@@ -22,12 +22,7 @@ import { InventoryItem, SkewerFlavor } from '@/lib/store';
 
 export default function InventoryPage() {
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
-  const [editedInventory, setEditedInventory] = useState<Record<SkewerFlavor, number>>({
-    Carne: 0,
-    Frango: 0,
-    Queijo: 0,
-    Calabresa: 0
-  });
+  const [editedInventory, setEditedInventory] = useState<Record<SkewerFlavor, number>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,26 +36,25 @@ export default function InventoryPage() {
   const loadInventory = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/inventory');
+      const response = await fetch('/api/inventory/realtime'); // Changed endpoint
       
       if (response.ok) {
         const data = await response.json();
-        setInventory(data);
+        // The new endpoint returns an object with an 'inventory' property
+        setInventory(data.inventory);
         
-        // Initialize edited inventory
-        const initialEdited: Record<SkewerFlavor, number> = {
-          Carne: 0,
-          Frango: 0,
-          Queijo: 0,
-          Calabresa: 0
-        };
-        data.forEach((item: InventoryItem) => {
+        // Initialize edited inventory dynamically based on fetched data
+        const initialEdited: Record<SkewerFlavor, number> = {};
+        data.inventory.forEach((item: InventoryItem) => {
           initialEdited[item.flavor] = item.quantity;
         });
         setEditedInventory(initialEdited);
         setHasChanges(false);
+        setSuccess('Estoque recarregado com sucesso!'); // Added success message
+        setTimeout(() => setSuccess(null), 3000);
       } else {
-        setError('Erro ao carregar estoque');
+        const errorData = await response.json();
+        setError(errorData.error || 'Erro ao carregar estoque');
       }
     } catch (err) {
       setError('Erro de conexão');
@@ -214,6 +208,11 @@ export default function InventoryPage() {
           <CardBody>
             {error && <Alert color="danger">{error}</Alert>}
             {success && <Alert color="success">{success}</Alert>}
+            
+            <Alert color="info" className="mb-3">
+              <Icon icon="mdi:cloud-sync" className="me-2" />
+              <strong>Sincronização Externa:</strong> As alterações no estoque são automaticamente enviadas para o sistema externo quando salvas.
+            </Alert>
 
             <Form>
               <Table responsive>

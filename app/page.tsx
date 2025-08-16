@@ -15,7 +15,11 @@ import {
   Table,
   Badge,
   Alert,
-  Spinner
+  Spinner,
+  Modal,
+  ModalHeader,
+  ModalBody,
+  ModalFooter
 } from 'reactstrap';
 import { Icon } from '@iconify/react';
 import { Order, OrderItem, SkewerFlavor, Beverage, InventoryItem } from '@/lib/store';
@@ -38,6 +42,12 @@ export default function HomePage() {
   // Form state
   const [customerName, setCustomerName] = useState('');
   const [orderItems, setOrderItems] = useState<NewOrderItem[]>([]);
+
+  // Edit modal state
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editingOrder, setEditingOrder] = useState<Order | null>(null);
+  const [editCustomerName, setEditCustomerName] = useState('');
+  const [editOrderItems, setEditOrderItems] = useState<NewOrderItem[]>([]);
 
   // Dynamic products from external APIs
   const [flavors, setFlavors] = useState<SkewerFlavor[]>([]);
@@ -201,7 +211,7 @@ export default function HomePage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          tags: ['external-inventory', 'external-products']
+          tags: ['external-inventory', 'external-products', 'external-orders']
         })
       });
       
@@ -213,6 +223,175 @@ export default function HomePage() {
       setError('Erro ao atualizar dados');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const deleteOrder = async (orderId: string, customerName: string) => {
+    if (!window.confirm(`Tem certeza que deseja excluir o pedido de ${customerName}?`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/orders/${orderId}`, {
+        method: 'DELETE'
+      });
+
+      if (response.ok) {
+        setSuccess('Pedido excluído com sucesso!');
+        await loadData();
+        setTimeout(() => setSuccess(null), 3000);
+      } else {
+        const errorData = await response.json();
+        setError(errorData.error || 'Erro ao excluir pedido');
+      }
+    } catch (err) {
+      setError('Erro de conexão');
+    }
+  };
+
+  const updateOrder = async (orderId: string, updatedData: { customerName: string; items: NewOrderItem[] }) => {
+    try {
+      const response = await fetch(`/api/orders/${orderId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customerName: updatedData.customerName.trim(),
+          items: updatedData.items
+        })
+      });
+
+      if (response.ok) {
+        setSuccess('Pedido atualizado com sucesso!');
+        await loadData();
+        setTimeout(() => setSuccess(null), 3000);
+        return true;
+      } else {
+        const errorData = await response.json();
+        setError(errorData.error || 'Erro ao atualizar pedido');
+        return false;
+      }
+    } catch (err) {
+      setError('Erro de conexão');
+      return false;
+    }
+  };
+
+  // Edit modal functions
+  const openEditModal = (order: Order) => {
+    setEditingOrder(order);
+    setEditCustomerName(order.customerName);
+    
+    // Parse the external order items correctly
+    const editItems: NewOrderItem[] = [];
+    
+    for (const item of order.items) {
+      if (item.type === 'beverage' && item.beverage && item.beverage.includes('x')) {
+        // This looks like a parsed string from external API - parse it properly
+        const itemsText = item.beverage;
+        const lines = itemsText.split('/');
+        
+        for (const line of lines) {
+          const trimmedLine = line.trim();
+          if (!trimmedLine) continue;
+          
+          const match = trimmedLine.match(/^(.+?)\s*x\s*(\d+)$/i);
+          if (match) {
+            const itemName = match[1].trim();
+            const quantity = parseInt(match[2], 10) || 1;
+            
+            // Determine if it's a skewer or beverage based on name
+            const lowerItemName = itemName.toLowerCase();
+            
+            if (lowerItemName.includes('coca') || lowerItemName.includes('guaraná') || 
+                lowerItemName.includes('água') || lowerItemName.includes('suco') ||
+                lowerItemName.includes('bebida') || lowerItemName.includes('refrigerante')) {
+              editItems.push({
+                type: 'beverage',
+                beverage: itemName,
+                qty: quantity
+              });
+            } else {
+              editItems.push({
+                type: 'skewer',
+                flavor: itemName,
+                qty: quantity
+              });
+            }
+          }
+        }
+      } else {
+        // Regular item - use as is
+        editItems.push({
+          type: item.type,
+          flavor: item.type === 'skewer' ? item.flavor : undefined,
+          beverage: item.type === 'beverage' ? item.beverage : undefined,
+          qty: item.qty
+        });
+      }
+    }
+    
+    setEditOrderItems(editItems);
+    setEditModalOpen(true);
+  };
+
+  const closeEditModal = () => {
+    setEditModalOpen(false);
+    setEditingOrder(null);
+    setEditCustomerName('');
+    setEditOrderItems([]);
+  };
+
+  const addEditSkewerItem = () => {
+    const defaultFlavor = flavors.length > 0 ? flavors[0] : 'Carne';
+    setEditOrderItems([...editOrderItems, { type: 'skewer', flavor: defaultFlavor, qty: 1 }]);
+  };
+
+  const addEditBeverageItem = () => {
+    const defaultBeverage = beverages.length > 0 ? beverages[0] : 'Coca-Cola';
+    setEditOrderItems([...editOrderItems, { type: 'beverage', beverage: defaultBeverage, qty: 1 }]);
+  };
+
+  const removeEditItem = (index: number) => {
+    setEditOrderItems(editOrderItems.filter((_, i) => i !== index));
+  };
+
+  const updateEditItem = (index: number, updates: Partial<NewOrderItem>) => {
+    const newItems = [...editOrderItems];
+    newItems[index] = { ...newItems[index], ...updates };
+    setEditOrderItems(newItems);
+  };
+
+  const canSubmitEditOrder = (): boolean => {
+    if (!editCustomerName.trim() || editOrderItems.length === 0) return false;
+    
+    // Check if all skewer items have available stock
+    return editOrderItems.every(item => {
+      if (item.type === 'skewer' && item.flavor) {
+        return getAvailableStock(item.flavor) >= item.qty;
+      }
+      return true;
+    });
+  };
+
+  const submitEditOrder = async () => {
+    if (!editingOrder || !canSubmitEditOrder()) return;
+
+    try {
+      setSubmitting(true);
+      setError(null);
+
+      const success = await updateOrder(editingOrder.id, {
+        customerName: editCustomerName,
+        items: editOrderItems
+      });
+
+      if (success) {
+        closeEditModal();
+      }
+    } catch (err) {
+      setError('Erro de conexão');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -412,10 +591,30 @@ export default function HomePage() {
                             {order.status === 'entregue' ? 'Entregue' : 'Em Preparo'}
                           </Badge>
                         </h5>
-                        <small className="text-muted">
-                          <Icon icon="mdi:clock" className="me-1" />
-                          {formatTime(order.createdAt)}
-                        </small>
+                        <div className="d-flex justify-content-between align-items-center">
+                          <small className="text-muted">
+                            <Icon icon="mdi:clock" className="me-1" />
+                            {formatTime(order.createdAt)}
+                          </small>
+                          <div className="d-flex gap-2">
+                            <Button
+                              color="outline-primary"
+                              size="sm"
+                              onClick={() => openEditModal(order)}
+                              title="Editar pedido"
+                            >
+                              <Icon icon="mdi:pencil" />
+                            </Button>
+                            <Button
+                              color="outline-danger"
+                              size="sm"
+                              onClick={() => deleteOrder(order.id, order.customerName)}
+                              title="Excluir pedido"
+                            >
+                              <Icon icon="mdi:delete" />
+                            </Button>
+                          </div>
+                        </div>
                       </Col>
                       <Col md={6}>
                         <Table size="sm" className="mb-0">
@@ -528,6 +727,162 @@ export default function HomePage() {
           </CardBody>
         </Card>
       </Col>
+
+      {/* Edit Order Modal */}
+      <Modal isOpen={editModalOpen} toggle={closeEditModal} size="lg">
+        <ModalHeader toggle={closeEditModal}>
+          <Icon icon="mdi:pencil" className="me-2" />
+          Editar Pedido - {editingOrder?.customerName}
+        </ModalHeader>
+        <ModalBody>
+          {error && <Alert color="danger">{error}</Alert>}
+          
+          <Form>
+            <FormGroup>
+              <Label for="editCustomerName">Nome do Cliente *</Label>
+              <Input
+                id="editCustomerName"
+                value={editCustomerName}
+                onChange={(e) => setEditCustomerName(e.target.value)}
+                placeholder="Digite o nome do cliente"
+              />
+            </FormGroup>
+
+            {/* Edit Order Items */}
+            <div className="mb-3">
+              <Label className="fw-bold">Itens do Pedido</Label>
+              
+              {editOrderItems.map((item, index) => (
+                <div key={index} className="order-item">
+                  <Row className="align-items-center">
+                    <Col md={3}>
+                      <FormGroup>
+                        <Label>Tipo</Label>
+                        <Input
+                          type="select"
+                          value={item.type}
+                          onChange={(e) => updateEditItem(index, { 
+                            type: e.target.value as 'skewer' | 'beverage',
+                            flavor: e.target.value === 'skewer' ? (flavors.length > 0 ? flavors[0] : 'Carne') : undefined,
+                            beverage: e.target.value === 'beverage' ? (beverages.length > 0 ? beverages[0] : 'Coca-Cola') : undefined
+                          })}
+                        >
+                          <option value="skewer">Espetinho</option>
+                          <option value="beverage">Bebida</option>
+                        </Input>
+                      </FormGroup>
+                    </Col>
+                    
+                    <Col md={4}>
+                      <FormGroup>
+                        <Label>{item.type === 'skewer' ? 'Sabor' : 'Bebida'}</Label>
+                        {item.type === 'skewer' ? (
+                          <Input
+                            type="select"
+                            value={item.flavor || ''}
+                            onChange={(e) => updateEditItem(index, { flavor: e.target.value as SkewerFlavor })}
+                          >
+                            {flavors.map(flavor => (
+                              <option 
+                                key={flavor} 
+                                value={flavor}
+                                disabled={!isFlavorAvailable(flavor)}
+                              >
+                                {flavor} {!isFlavorAvailable(flavor) ? '(Indisponível)' : ''}
+                              </option>
+                            ))}
+                          </Input>
+                        ) : (
+                          <Input
+                            type="select"
+                            value={item.beverage || ''}
+                            onChange={(e) => updateEditItem(index, { beverage: e.target.value as Beverage })}
+                          >
+                            {beverages.map(beverage => (
+                              <option key={beverage} value={beverage}>
+                                {beverage}
+                              </option>
+                            ))}
+                          </Input>
+                        )}
+                      </FormGroup>
+                    </Col>
+                    
+                    <Col md={2}>
+                      <FormGroup>
+                        <Label>Quantidade</Label>
+                        <Input
+                          type="number"
+                          min="1"
+                          value={item.qty}
+                          onChange={(e) => updateEditItem(index, { qty: parseInt(e.target.value) || 1 })}
+                        />
+                      </FormGroup>
+                    </Col>
+                    
+                    <Col md={2}>
+                      {item.type === 'skewer' && item.flavor && (
+                        <div className="mt-4">
+                          <Badge 
+                            color={!isFlavorAvailable(item.flavor) ? 'danger' : isFlavorLowStock(item.flavor) ? 'warning' : 'success'}
+                            className="stock-badge"
+                          >
+                            Estoque: {getAvailableStock(item.flavor)}
+                          </Badge>
+                        </div>
+                      )}
+                    </Col>
+                    
+                    <Col md={1}>
+                      <Button
+                        color="danger"
+                        size="sm"
+                        onClick={() => removeEditItem(index)}
+                        className="mt-4"
+                      >
+                        <Icon icon="mdi:delete" />
+                      </Button>
+                    </Col>
+                  </Row>
+                </div>
+              ))}
+
+              <div className="d-flex gap-2 mt-3">
+                <Button color="outline-primary" onClick={addEditSkewerItem}>
+                  <Icon icon="mdi:plus" className="me-1" />
+                  Adicionar Espetinho
+                </Button>
+                <Button color="outline-info" onClick={addEditBeverageItem}>
+                  <Icon icon="mdi:plus" className="me-1" />
+                  Adicionar Bebida
+                </Button>
+              </div>
+            </div>
+          </Form>
+        </ModalBody>
+        <ModalFooter>
+          <Button color="secondary" onClick={closeEditModal}>
+            Cancelar
+          </Button>
+          <Button
+            color="primary"
+            onClick={submitEditOrder}
+            disabled={!canSubmitEditOrder() || submitting}
+          >
+            {submitting ? (
+              <>
+                <Spinner size="sm" className="me-2" />
+                Atualizando...
+              </>
+            ) : (
+              <>
+                <Icon icon="mdi:check" className="me-2" />
+                Salvar Alterações
+              </>
+            )}
+          </Button>
+        </ModalFooter>
+      </Modal>
     </Row>
   );
 }
