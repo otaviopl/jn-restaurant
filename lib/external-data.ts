@@ -15,12 +15,11 @@ const DEFAULT_REVALIDATE = 300;
 
 // Function to normalize external flavor names to consistent format
 function normalizeFlavorName(externalFlavor: string): SkewerFlavor {
-  // Simply use the external flavor name as-is, just normalize whitespace
-  return externalFlavor.trim();
+  return externalFlavor.trim().toLowerCase();
 }
 
 // Function to parse items string from external orders
-function parseOrderItems(itemsString: string): OrderItem[] {
+function parseOrderItems(itemsString: string, availableFlavors: SkewerFlavor[]): OrderItem[] {
   if (!itemsString || typeof itemsString !== 'string') {
     return [];
   }
@@ -32,28 +31,33 @@ function parseOrderItems(itemsString: string): OrderItem[] {
     const trimmedLine = line.trim();
     if (!trimmedLine) continue;
 
-    // Parse pattern like "pão de alho x 1" or "Carne x 2"
+    // Try to parse "Flavor x Qty" pattern first
     const match = trimmedLine.match(/^(.+?)\s*x\s*(\d+)$/i);
     
     if (match) {
       const itemName = match[1].trim();
       const quantity = parseInt(match[2], 10) || 1;
-
-      // Try to determine if it's a skewer or beverage
-      // This is a simple heuristic - you might want to improve this based on your data
       const lowerItemName = itemName.toLowerCase();
-      
-      let type: 'skewer' | 'beverage' = 'skewer'; // default to skewer
-      let flavor: string | undefined = itemName;
-      let beverage: string | undefined = undefined;
 
-      // Simple detection - can be improved based on your actual data patterns
+      let type: 'skewer' | 'beverage' = 'skewer';
+      let flavor: SkewerFlavor | undefined = undefined;
+      let beverage: Beverage | undefined = undefined;
+
+      // Check if it's a known beverage
       if (lowerItemName.includes('coca') || lowerItemName.includes('guaraná') || 
           lowerItemName.includes('água') || lowerItemName.includes('suco') ||
           lowerItemName.includes('bebida') || lowerItemName.includes('refrigerante')) {
         type = 'beverage';
-        beverage = itemName;
-        flavor = undefined;
+        beverage = normalizeFlavorName(itemName); // Use normalizeFlavorName for beverages too
+      } else {
+        // Try to match against available flavors
+        const matchedFlavor = availableFlavors.find(f => normalizeFlavorName(itemName).includes(normalizeFlavorName(f)));
+        if (matchedFlavor) {
+          flavor = matchedFlavor;
+        } else {
+          // Fallback if no specific flavor match, but it's a skewer type
+          flavor = normalizeFlavorName(itemName);
+        }
       }
 
       items.push({
@@ -62,20 +66,63 @@ function parseOrderItems(itemsString: string): OrderItem[] {
         flavor,
         beverage,
         qty: quantity,
-        deliveredQty: 0 // External orders start as not delivered
-      });
-    } else {
-      // If pattern doesn't match, treat as skewer with qty 1
-      items.push({
-        id: `external-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        type: 'skewer',
-        flavor: trimmedLine,
-        qty: 1,
         deliveredQty: 0
       });
+    } else {
+      // If "Flavor x Qty" pattern doesn't match, try to find known flavors within the line
+      let remainingLine = trimmedLine;
+      let foundAnyFlavor = false;
+
+      for (const knownFlavor of availableFlavors) {
+        const normalizedKnownFlavor = normalizeFlavorName(knownFlavor);
+        const regex = new RegExp(`(${normalizedKnownFlavor})\s*(?:x\s*(\d+))?`, 'gi'); // Match flavor and optional quantity
+        let flavorMatch;
+        while ((flavorMatch = regex.exec(remainingLine)) !== null) {
+          foundAnyFlavor = true;
+          const matchedFlavorName = flavorMatch[1];
+          const matchedQty = parseInt(flavorMatch[2] || '1', 10);
+
+          items.push({
+            id: `external-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            type: 'skewer',
+            flavor: normalizeFlavorName(matchedFlavorName),
+            beverage: undefined,
+            qty: matchedQty,
+            deliveredQty: 0
+          });
+          // Remove the matched part from remainingLine to avoid re-matching
+          remainingLine = remainingLine.replace(flavorMatch[0], '').trim();
+          regex.lastIndex = 0; // Reset regex lastIndex for next iteration
+        }
+      }
+
+      // Fallback for beverages if no skewer flavors were found in this complex line
+      if (!foundAnyFlavor) {
+        const lowerTrimmedLine = trimmedLine.toLowerCase();
+        if (lowerTrimmedLine.includes('coca') || lowerTrimmedLine.includes('guaraná') || 
+            lowerTrimmedLine.includes('água') || lowerTrimmedLine.includes('suco') ||
+            lowerTrimmedLine.includes('bebida') || lowerTrimmedLine.includes('refrigerante')) {
+          items.push({
+            id: `external-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            type: 'beverage',
+            flavor: undefined,
+            beverage: normalizeFlavorName(trimmedLine),
+            qty: 1,
+            deliveredQty: 0
+          });
+        } else {
+          // If still no match, treat the whole line as a single skewer item with qty 1
+          items.push({
+            id: `external-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            type: 'skewer',
+            flavor: normalizeFlavorName(trimmedLine),
+            qty: 1,
+            deliveredQty: 0
+          });
+        }
+      }
     }
   }
-
   return items;
 }
 
@@ -244,11 +291,11 @@ export async function fetchExternalProducts(): Promise<{ flavors: SkewerFlavor[]
       .filter(b => b && typeof b === 'string') as Beverage[];
 
     const result = {
-      flavors: flavors.length > 0 ? flavors : ['Carne', 'Frango', 'Queijo', 'Calabresa'], // fallback
-      beverages: beverages.length > 0 ? beverages : ['Coca-Cola', 'Guaraná', 'Água', 'Suco'] // fallback
-    };
+        flavors: flavors.length > 0 ? flavors : ['carne', 'frango', 'queijo', 'calabresa'].map(f => normalizeFlavorName(f)), // Fallback normalized
+        beverages: beverages.length > 0 ? beverages : ['coca-cola', 'guaraná', 'água', 'suco'].map(b => normalizeFlavorName(b)) // Fallback normalized
+      };
 
-    return result;
+      return result;
 
   } catch (error) {
     console.error('Error fetching external products:', error);
@@ -325,8 +372,8 @@ async function deriveProductsFromInventory(): Promise<{ flavors: SkewerFlavor[];
       }
     }
 
-    const flavors = Array.from(flavorsSet);
-    const beverages: Beverage[] = ['Coca-Cola', 'Guaraná', 'Água', 'Suco']; // Default beverages
+    const flavors = Array.from(flavorsSet).map(f => normalizeFlavorName(f)); // Normalize here
+    const beverages: Beverage[] = ['coca-cola', 'guaraná', 'água', 'suco'].map(b => normalizeFlavorName(b)); // Normalize here
 
     return { flavors, beverages };
 
@@ -345,6 +392,17 @@ export async function fetchExternalOrders(): Promise<Order[] | null> {
   }
 
   try {
+    // Fetch products data first to get available flavors
+    const productsData = await fetchExternalProducts();
+    let availableFlavors: SkewerFlavor[] = [];
+    if (productsData) {
+      availableFlavors = productsData.flavors;
+    } else {
+      console.warn('Could not fetch products data for parsing external orders. Using fallback flavors.');
+      // Fallback to default flavors if productsData cannot be fetched
+      availableFlavors = ['Carne', 'Frango', 'Queijo', 'Calabresa'];
+    }
+
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'User-Agent': 'JN-Burger-Backoffice/1.0.0',
@@ -379,7 +437,6 @@ export async function fetchExternalOrders(): Promise<Order[] | null> {
       return null;
     }
     
-    // Process each order from external API
     const orders: Order[] = [];
     
     for (const externalOrder of data) {
@@ -388,7 +445,8 @@ export async function fetchExternalOrders(): Promise<Order[] | null> {
         continue;
       }
 
-      const parsedItems = parseOrderItems(externalOrder.Itens);
+      // Pass availableFlavors to parseOrderItems
+      const parsedItems = parseOrderItems(externalOrder.Itens, availableFlavors); 
       if (parsedItems.length === 0) {
         console.warn('No valid items found in external order:', externalOrder);
         continue;

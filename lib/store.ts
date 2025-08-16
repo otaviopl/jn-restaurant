@@ -53,6 +53,7 @@ const db = {
     try {
       const fileContent = await fs.readFile(dbPath, 'utf-8');
       memoryCache = JSON.parse(fileContent);
+      console.log('lib/store: Inventory after db.read() from file:', memoryCache.inventory);
       return memoryCache!;
     } catch (error: any) {
       if (error.code === 'ENOENT') {
@@ -73,6 +74,7 @@ const db = {
         };
         await db.write(initialData);
         memoryCache = initialData;
+        console.log('lib/store: Inventory after db.read() (ENOENT, initialData):', memoryCache.inventory);
         return initialData;
       }
       throw error;
@@ -144,6 +146,7 @@ async function adjustInventoryQuantity(
 // --- INVENTORY MANAGEMENT ---
 export async function getInventory(): Promise<InventoryItem[]> {
   const { inventory } = await db.read();
+  console.log('lib/store: getInventory() returning:', inventory);
   return inventory;
 }
 

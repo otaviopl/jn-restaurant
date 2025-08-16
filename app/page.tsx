@@ -76,6 +76,7 @@ export default function HomePage() {
       if (inventoryRes.ok) {
         const inventoryData = await inventoryRes.json();
         setInventory(inventoryData);
+        console.log('app/page: Inventory state after loadData():', inventoryData);
       }
 
       if (productsRes.ok) {
@@ -178,17 +179,40 @@ export default function HomePage() {
 
   const updateDeliveredQty = async (orderId: string, itemId: string, deliveredQty: number) => {
     try {
-      const response = await fetch(`/api/orders/${orderId}/items/${itemId}`, {
-        method: 'PATCH',
+      // Find the order and item locally to get the full order object
+      const orderToUpdate = orders.find(order => order.id === orderId);
+      if (!orderToUpdate) {
+        setError('Pedido não encontrado localmente.');
+        return;
+      }
+
+      // Create a deep copy to avoid direct state mutation
+      const updatedItems = orderToUpdate.items.map(item => 
+        item.id === itemId ? { ...item, deliveredQty: deliveredQty } : item
+      );
+
+      // Construct the payload for the external API update
+      // The external API expects the full order object with updated items
+      const payload = {
+        row_number: orderId, // orderId is the row_number for external orders
+        items: updatedItems, // Send the entire updated items array
+        customerName: orderToUpdate.customerName, // Include customerName
+        status: orderToUpdate.status // Include current status (will be recalculated by external API)
+      };
+
+      const response = await fetch('/api/orders/update', {
+        method: 'PATCH', // Will change app/api/orders/update/route.ts to PATCH
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ deliveredQty })
+        body: JSON.stringify(payload)
       });
 
       if (response.ok) {
-        await loadData();
+        setSuccess('Quantidade entregue atualizada com sucesso!');
+        await loadData(); // Reload all data to reflect changes
+        setTimeout(() => setSuccess(null), 3000);
       } else {
         const errorData = await response.json();
-        setError(errorData.error || 'Erro ao atualizar item');
+        setError(errorData.error || 'Erro ao atualizar quantidade entregue');
       }
     } catch (err) {
       setError('Erro de conexão');
@@ -281,54 +305,18 @@ export default function HomePage() {
     setEditingOrder(order);
     setEditCustomerName(order.customerName);
     
-    // Parse the external order items correctly
-    const editItems: NewOrderItem[] = [];
-    
-    for (const item of order.items) {
-      if (item.type === 'beverage' && item.beverage && item.beverage.includes('x')) {
-        // This looks like a parsed string from external API - parse it properly
-        const itemsText = item.beverage;
-        const lines = itemsText.split('/');
-        
-        for (const line of lines) {
-          const trimmedLine = line.trim();
-          if (!trimmedLine) continue;
-          
-          const match = trimmedLine.match(/^(.+?)\s*x\s*(\d+)$/i);
-          if (match) {
-            const itemName = match[1].trim();
-            const quantity = parseInt(match[2], 10) || 1;
-            
-            // Determine if it's a skewer or beverage based on name
-            const lowerItemName = itemName.toLowerCase();
-            
-            if (lowerItemName.includes('coca') || lowerItemName.includes('guaraná') || 
-                lowerItemName.includes('água') || lowerItemName.includes('suco') ||
-                lowerItemName.includes('bebida') || lowerItemName.includes('refrigerante')) {
-              editItems.push({
-                type: 'beverage',
-                beverage: itemName,
-                qty: quantity
-              });
-            } else {
-              editItems.push({
-                type: 'skewer',
-                flavor: itemName,
-                qty: quantity
-              });
-            }
-          }
-        }
-      } else {
-        // Regular item - use as is
-        editItems.push({
-          type: item.type,
-          flavor: item.type === 'skewer' ? item.flavor : undefined,
-          beverage: item.type === 'beverage' ? item.beverage : undefined,
-          qty: item.qty
-        });
-      }
-    }
+    console.log('app/page: Order items in openEditModal:', order.items);
+
+    const editItems: NewOrderItem[] = order.items.map(item => {
+      const availableStock = getAvailableStock(item.flavor as SkewerFlavor);
+      console.log(`app/page: Edit Modal Item - Flavor: ${item.flavor}, Qty in Order: ${item.qty}, Available Stock: ${availableStock}`);
+      return {
+        type: item.type,
+        flavor: item.flavor,
+        beverage: item.beverage,
+        qty: item.qty
+      };
+    });
     
     setEditOrderItems(editItems);
     setEditModalOpen(true);
