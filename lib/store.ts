@@ -42,7 +42,7 @@ interface DbData {
 }
 
 // --- DATABASE (JSON file) ---
-const dbPath = path.join(process.cwd(), 'db.json');
+const dbPath = '/tmp/db.json';
 let memoryCache: DbData | null = null;
 
 const db = {

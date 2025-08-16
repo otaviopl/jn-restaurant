@@ -3,7 +3,7 @@
   "inventory": [
     {
       "flavor": "Carne",
-      "quantity": 45,
+      "quantity": 43,
       "initialQuantity": 45
     },
     {
@@ -18,7 +18,7 @@
     },
     {
       "flavor": "Pão de Alho",
-      "quantity": 10,
+      "quantity": 8,
       "initialQuantity": 10
     },
     {
@@ -60,5 +60,5 @@
       "Suco"
     ]
   },
-  "lastSync": "2025-08-16T14:01:57.979Z"
+  "lastSync": "2025-08-16T14:06:59.906Z"
 }
