@@ -5,7 +5,7 @@
       "customerName": "otávio",
       "items": [
         {
-          "id": "external-1755351109775-seg72bqrm",
+          "id": "external-1755351584737-c083p7zoe",
           "type": "beverage",
           "beverage": "carne x 5 / quejio x 4 / coca-cola",
           "qty": 1,
@@ -13,7 +13,7 @@
         }
       ],
       "status": "em_preparo",
-      "createdAt": "2025-08-16T13:31:49.775Z",
+      "createdAt": "2025-08-16T13:39:44.737Z",
       "source": "external",
       "modified": false
     },
@@ -22,7 +22,7 @@
       "customerName": "otávio",
       "items": [
         {
-          "id": "external-1755351109775-zhfv1appu",
+          "id": "external-1755351584737-4wypnkvo5",
           "type": "beverage",
           "beverage": "coca-cola",
           "qty": 1,
@@ -30,7 +30,7 @@
         }
       ],
       "status": "em_preparo",
-      "createdAt": "2025-08-16T13:31:49.775Z",
+      "createdAt": "2025-08-16T13:39:44.737Z",
       "source": "external",
       "modified": false
     },
@@ -39,7 +39,7 @@
       "customerName": "otávio",
       "items": [
         {
-          "id": "external-1755351109775-y7bom7x0l",
+          "id": "external-1755351584737-twk1renp1",
           "type": "skewer",
           "flavor": "carne",
           "qty": 1,
@@ -47,15 +47,71 @@
         }
       ],
       "status": "em_preparo",
-      "createdAt": "2025-08-16T13:31:49.775Z",
+      "createdAt": "2025-08-16T13:39:44.737Z",
       "source": "external",
       "modified": false
+    },
+    {
+      "id": "5",
+      "customerName": "otávio",
+      "items": [
+        {
+          "id": "external-1755351584737-ifiprzlw0",
+          "type": "skewer",
+          "flavor": "carne",
+          "qty": 1,
+          "deliveredQty": 0
+        }
+      ],
+      "status": "em_preparo",
+      "createdAt": "2025-08-16T13:39:44.737Z",
+      "source": "external",
+      "modified": false
+    },
+    {
+      "id": "local-1755351687979-ect3nfkcn",
+      "customerName": "otávio",
+      "items": [
+        {
+          "type": "skewer",
+          "flavor": "Pão de Alho",
+          "qty": 1,
+          "id": "item-1755351687979-gs28v48l1",
+          "deliveredQty": 0
+        },
+        {
+          "type": "skewer",
+          "flavor": "Carne",
+          "qty": 1,
+          "id": "item-1755351687979-fih3frhcx",
+          "deliveredQty": 0
+        }
+      ],
+      "status": "em_preparo",
+      "createdAt": "2025-08-16T13:41:27.979Z",
+      "source": "local"
+    },
+    {
+      "id": "local-1755351892157-ye0mw4ff6",
+      "customerName": "otávio",
+      "items": [
+        {
+          "type": "skewer",
+          "flavor": "Carne",
+          "qty": 1,
+          "id": "item-1755351892157-3jujbzao9",
+          "deliveredQty": 0
+        }
+      ],
+      "status": "em_preparo",
+      "createdAt": "2025-08-16T13:44:52.157Z",
+      "source": "local"
     }
   ],
   "inventory": [
     {
       "flavor": "Carne",
-      "quantity": 39,
+      "quantity": 44,
       "initialQuantity": 45
     },
     {
@@ -75,7 +131,7 @@
     },
     {
       "flavor": "Quejio",
-      "quantity": 31,
+      "quantity": 35,
       "initialQuantity": 35
     },
     {
@@ -112,5 +168,5 @@
       "Suco"
     ]
   },
-  "lastSync": "2025-08-16T13:31:49.776Z"
+  "lastSync": "2025-08-16T13:44:52.157Z"
 }

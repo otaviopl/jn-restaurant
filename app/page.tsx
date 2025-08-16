@@ -563,9 +563,20 @@ export default function HomePage() {
 
         {/* Orders List */}
         <Card>
-          <CardHeader>
-            <Icon icon="mdi:format-list-bulleted" className="me-2" />
-            Pedidos ({orders.length})
+          <CardHeader className="d-flex justify-content-between align-items-center">
+            <div>
+              <Icon icon="mdi:format-list-bulleted" className="me-2" />
+              Pedidos ({orders.length})
+            </div>
+            <Button
+              color="outline-primary"
+              size="sm"
+              onClick={loadData}
+              disabled={loading}
+            >
+              <Icon icon="mdi:refresh" className="me-1" />
+              Recarregar Pedidos
+            </Button>
           </CardHeader>
           <CardBody>
             {orders.length === 0 ? (
