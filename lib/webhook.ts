@@ -14,7 +14,16 @@ export interface WebhookPayload {
  * Sends data to configured webhook endpoint
  */
 export async function sendWebhook(payload: WebhookPayload): Promise<{ success: boolean; error?: string }> {
-  const webhookUrl = process.env.WEBHOOK_URL;
+  let webhookUrl: string | undefined;
+
+  if (payload.event.startsWith('order.')) {
+    webhookUrl = process.env.EXTERNAL_ORDER_UPDATE_URL;
+  } else if (payload.event === 'inventory.updated') {
+    webhookUrl = process.env.EXTERNAL_INVENTORY_UPDATE_URL;
+  } else {
+    console.warn(`Unknown webhook event type: ${payload.event}, skipping webhook call`);
+    return { success: false, error: `Unknown webhook event type: ${payload.event}` };
+  }
   const webhookSecret = process.env.WEBHOOK_SECRET;
   const webhookTimeout = parseInt(process.env.WEBHOOK_TIMEOUT || '5000');
 

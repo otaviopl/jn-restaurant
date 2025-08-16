@@ -1,5 +1,81 @@
 {
-  "orders": [],
+  "orders": [
+    {
+      "id": "7",
+      "customerName": "João Silva",
+      "items": [
+        {
+          "id": "external-test-1",
+          "type": "skewer",
+          "flavor": "pão de alho",
+          "qty": 2,
+          "deliveredQty": 0
+        },
+        {
+          "id": "external-test-2", 
+          "type": "skewer",
+          "flavor": "Carne",
+          "qty": 3,
+          "deliveredQty": 0
+        }
+      ],
+      "status": "todo",
+      "createdAt": "2025-01-16T15:30:00.000Z",
+      "source": "external",
+      "modified": false
+    },
+    {
+      "id": "8",
+      "customerName": "Maria Santos",
+      "items": [
+        {
+          "id": "external-test-3",
+          "type": "skewer",
+          "flavor": "Coração",
+          "qty": 5,
+          "deliveredQty": 2
+        }
+      ],
+      "status": "in_progress",
+      "createdAt": "2025-01-16T15:25:00.000Z",
+      "source": "external",
+      "modified": false
+    },
+    {
+      "id": "9",
+      "customerName": "Pedro Costa",
+      "items": [
+        {
+          "id": "external-test-4",
+          "type": "skewer",
+          "flavor": "Misto",
+          "qty": 2,
+          "deliveredQty": 2
+        }
+      ],
+      "status": "done",
+      "createdAt": "2025-01-16T15:20:00.000Z",
+      "source": "external",
+      "modified": false
+    },
+    {
+      "id": "10",
+      "customerName": "Ana Oliveira",
+      "items": [
+        {
+          "id": "external-test-5",
+          "type": "skewer",
+          "flavor": "Quejio",
+          "qty": 1,
+          "deliveredQty": 0
+        }
+      ],
+      "status": "canceled",
+      "createdAt": "2025-01-16T15:15:00.000Z",
+      "source": "external",
+      "modified": false
+    }
+  ],
   "inventory": [
     {
       "flavor": "Carne",

@@ -274,6 +274,32 @@ Response:
 - **Fallback automático** para dados locais
 - **Revalidação manual** via botão na interface
 
+## 🔄 Fluxo de Dados Híbrido (Local e Externo)
+
+Este sistema implementa um fluxo de dados híbrido para garantir a persistência e a sincronização com sistemas externos.
+
+### Persistência Local (`db.json`)
+
+- **Cache Local**: Os dados (pedidos, estoque, produtos) são armazenados em um cache local (`db.json`) no diretório `/tmp` do ambiente de execução (necessário para ambientes serverless como Vercel).
+- **Inicialização**: Se `db.json` não for encontrado, os dados são inicialmente carregados das APIs externas e salvos localmente.
+- **Volatilidade**: Devido à natureza do `/tmp` em ambientes serverless, este cache é volátil e pode ser reinicializado em cada "cold start" da função.
+
+### Sincronização Bidirecional
+
+- **Leitura (API Externa para Local)**:
+    - Ao iniciar ou quando `db.json` não existe, os dados são buscados das APIs externas (`fetchExternalInventory`, `fetchExternalOrders`, `fetchExternalProducts`).
+    - A rota `/api/revalidate` também força uma nova busca e sobrescreve o `db.json` local com os dados mais recentes da API externa.
+- **Escrita (Local para API Externa)**:
+    - **Qualquer alteração** realizada no sistema (criação/atualização/exclusão de pedidos, atualização de estoque) é primeiramente persistida no `db.json` local.
+    - **Em seguida**, a mesma alteração é enviada para a API externa correspondente (via `PATCH`, `POST`, `PUT` ou `DELETE`).
+    - **Tratamento de Erros**: Se o envio para a API externa falhar, a operação local no `db.json` **não é revertida**. Erros são logados no console para investigação.
+
+### Benefícios
+
+- **Consistência Local**: Garante que as operações do usuário sejam refletidas imediatamente na interface, mesmo que a API externa esteja temporariamente indisponível.
+- **Sincronização Contínua**: Mantém o sistema externo atualizado com as alterações locais.
+- **Resiliência**: Permite que o sistema continue operando com o cache local em caso de falhas na API externa (para operações de leitura e escrita, embora as escritas não sejam propagadas externamente até a API se recuperar).
+
 ### 🧪 Testes e Endpoints
 
 **📤 Testar Webhooks de Envio:**

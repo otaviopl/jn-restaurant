@@ -3,9 +3,29 @@ import { NextRequest, NextResponse } from 'next/server';
 const EXTERNAL_ORDER_UPDATE_URL = process.env.EXTERNAL_ORDER_UPDATE_URL;
 const API_KEY = process.env.EXTERNAL_API_KEY;
 
-export async function POST(request: NextRequest) {
+// Map internal Kanban status to external API format
+function mapStatusToExternal(status: string): string {
+  switch (status) {
+    case 'todo':
+      return 'A fazer';
+    case 'in_progress':
+    case 'em_preparo':
+      return 'Em preparo';
+    case 'done':
+    case 'entregue':
+      return 'Entregue';
+    case 'canceled':
+      return 'Cancelado';
+    default:
+      console.warn(`Unknown status: ${status}, defaulting to 'Em preparo'`);
+      return 'Em preparo';
+  }
+}
+
+export async function PATCH(request: NextRequest) {
   try {
     const body = await request.json();
+    // The body now contains the full order object from the frontend
     const { row_number, customerName, items, status } = body;
 
     if (!row_number) {
@@ -15,7 +35,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Se a URL externa não estiver configurada, retornar erro
     if (!EXTERNAL_ORDER_UPDATE_URL) {
       return NextResponse.json(
         { error: 'API externa não configurada' },
@@ -23,7 +42,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Preparar headers para API externa
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'User-Agent': 'JN-Burger-Backoffice/1.0.0',
@@ -33,35 +51,26 @@ export async function POST(request: NextRequest) {
       headers['Authorization'] = `Bearer ${API_KEY}`;
     }
 
-    // Converter items para o formato esperado pela API externa
+    // Convert items to the format expected by the external API
     let itemsString = '';
     if (items && Array.isArray(items)) {
-      const formattedItems = items.map(item => ({
+      const formattedItems = items.map((item: any) => ({
         nome: item.type === 'skewer' ? item.flavor : item.beverage,
         quantidade: item.qty
       }));
       itemsString = JSON.stringify(formattedItems);
     }
 
-    // Preparar payload no formato esperado pela API externa
+    // Prepare payload for the external API
     const payload: Array<Record<string, any>> = [{
       row_number: row_number,
       itens: itemsString,
-      cliente: customerName || undefined, // Initialize cliente property
-      situacao: status ? (status === 'em_preparo' ? 'Em preparo' : 'Entregue') : undefined // Initialize situacao property
+      cliente: customerName || undefined,
+      situacao: status ? mapStatusToExternal(status) : undefined
     }];
 
-    // Se outros campos forem fornecidos, adicionar ao payload
-    if (customerName) {
-      payload[0].cliente = customerName;
-    }
-    if (status) {
-      payload[0].situacao = status === 'em_preparo' ? 'Em preparo' : 'Entregue';
-    }
+    
 
-    console.log('Enviando atualização para API externa:', payload);
-
-    // Usar PUT com row_number no body
     const response = await fetch(EXTERNAL_ORDER_UPDATE_URL, {
       method: 'PUT',
       headers,

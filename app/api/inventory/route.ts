@@ -16,7 +16,7 @@ async function sendInventoryUpdateToExternal(updates: Record<SkewerFlavor, numbe
   }
 
   try {
-    console.log('Sending inventory update to external system with new format:', EXTERNAL_INVENTORY_UPDATE_URL);
+    
     
     // Transform the updates object to the desired array format
     const payload = Object.entries(updates).map(([flavor, stock]) => ({
@@ -24,7 +24,7 @@ async function sendInventoryUpdateToExternal(updates: Record<SkewerFlavor, numbe
       "Estoque": stock
     }));
     
-    console.log('Payload being sent:', JSON.stringify(payload, null, 2));
+    
     
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',

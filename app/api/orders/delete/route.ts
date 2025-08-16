@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
     // Preparar payload para API externa
     const payload = { row_number };
 
-    console.log('Enviando exclusão para API externa:', payload);
+    
 
     // Enviar diretamente para API externa
     const response = await fetch(EXTERNAL_ORDER_DELETE_URL, {

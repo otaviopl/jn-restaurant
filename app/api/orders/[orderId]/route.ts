@@ -61,6 +61,48 @@ export async function PUT(
   }
 }
 
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: { orderId: string } }
+) {
+  try {
+    const { orderId } = params;
+    const { status } = await request.json(); // Expecting only status in the body
+
+    if (!status) {
+      return NextResponse.json(
+        { error: 'Status é obrigatório para atualização PATCH' },
+        { status: 400 }
+      );
+    }
+
+    // Call updateOrder with only the status field
+    const result = await updateOrder(orderId, { status });
+
+    if (!result.success) {
+      return NextResponse.json(
+        { error: result.message },
+        { status: 400 }
+      );
+    }
+
+    if (result.order) {
+      const webhookPayload = createOrderWebhookPayload('order.updated', result.order);
+      sendWebhook(webhookPayload).catch(error => {
+        console.error('Failed to send order.updated webhook:', error);
+      });
+    }
+
+    return NextResponse.json(result.order);
+  } catch (error) {
+    console.error('Error patching order:', error);
+    return NextResponse.json(
+      { error: 'Erro interno do servidor' },
+      { status: 500 }
+    );
+  }
+}
+
 export async function DELETE(
   request: NextRequest,
   { params }: { params: { orderId: string } }

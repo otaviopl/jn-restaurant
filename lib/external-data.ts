@@ -15,45 +15,105 @@ const DEFAULT_REVALIDATE = 300;
 
 // Function to normalize external flavor names to consistent format
 function normalizeFlavorName(externalFlavor: string): SkewerFlavor {
-  // Simply use the external flavor name as-is, just normalize whitespace
-  return externalFlavor.trim();
+  if (!externalFlavor) return '';
+  
+  // Clean and normalize the flavor name
+  let normalized = externalFlavor.trim();
+  
+  // Common corrections and normalizations
+  const corrections: Record<string, string> = {
+    'quejio': 'queijo',
+    'quieijo': 'queijo',
+    'qeuijo': 'queijo',
+    'pao de alho': 'pão de alho',
+    'pão de alho': 'pão de alho',
+    'medalhao mandioca': 'medalhão mandioca',
+    'medalhao frango': 'medalhão frango',
+    'coracao': 'coração',
+    'coração': 'coração'
+  };
+  
+  const lowerNormalized = normalized.toLowerCase();
+  
+  // Apply corrections
+  for (const [wrong, correct] of Object.entries(corrections)) {
+    if (lowerNormalized.includes(wrong)) {
+      return correct;
+    }
+  }
+  
+  return normalized;
 }
 
 // Function to parse items string from external orders
-function parseOrderItems(itemsString: string): OrderItem[] {
+function parseOrderItems(itemsString: string, availableFlavors: SkewerFlavor[]): OrderItem[] {
   if (!itemsString || typeof itemsString !== 'string') {
     return [];
   }
 
   const items: OrderItem[] = [];
-  const lines = itemsString.split('\n').filter(line => line.trim());
+  // Try different separators: slash-separated (most common), newline-separated, or comma-separated
+  let lines: string[] = [];
+  
+  if (itemsString.includes(' / ')) {
+    lines = itemsString.split(' / ').filter(line => line.trim());
+  } else if (itemsString.includes('/')) {
+    lines = itemsString.split('/').filter(line => line.trim());
+  } else if (itemsString.includes('\n')) {
+    lines = itemsString.split('\n').filter(line => line.trim());
+  } else if (itemsString.includes(',')) {
+    lines = itemsString.split(',').filter(line => line.trim());
+  } else {
+    // Single item
+    lines = [itemsString.trim()];
+  }
 
   for (const line of lines) {
     const trimmedLine = line.trim();
     if (!trimmedLine) continue;
 
-    // Parse pattern like "pão de alho x 1" or "Carne x 2"
+    // Try to parse "Flavor x Qty" pattern first
     const match = trimmedLine.match(/^(.+?)\s*x\s*(\d+)$/i);
     
     if (match) {
       const itemName = match[1].trim();
       const quantity = parseInt(match[2], 10) || 1;
-
-      // Try to determine if it's a skewer or beverage
-      // This is a simple heuristic - you might want to improve this based on your data
       const lowerItemName = itemName.toLowerCase();
-      
-      let type: 'skewer' | 'beverage' = 'skewer'; // default to skewer
-      let flavor: string | undefined = itemName;
-      let beverage: string | undefined = undefined;
 
-      // Simple detection - can be improved based on your actual data patterns
+      let type: 'skewer' | 'beverage' = 'skewer';
+      let flavor: SkewerFlavor | undefined = undefined;
+      let beverage: Beverage | undefined = undefined;
+
+      // Check if it's a known beverage
       if (lowerItemName.includes('coca') || lowerItemName.includes('guaraná') || 
           lowerItemName.includes('água') || lowerItemName.includes('suco') ||
           lowerItemName.includes('bebida') || lowerItemName.includes('refrigerante')) {
         type = 'beverage';
-        beverage = itemName;
-        flavor = undefined;
+        beverage = normalizeFlavorName(itemName); // Use normalizeFlavorName for beverages too
+      } else {
+        // Try to match against available flavors with flexible matching
+        const normalizedItemName = normalizeFlavorName(itemName).toLowerCase();
+        
+        // First try exact match
+        let matchedFlavor = availableFlavors.find(f => 
+          normalizeFlavorName(f).toLowerCase() === normalizedItemName
+        );
+        
+        // If no exact match, try partial matching
+        if (!matchedFlavor) {
+          matchedFlavor = availableFlavors.find(f => {
+            const normalizedFlavor = normalizeFlavorName(f).toLowerCase();
+            return normalizedItemName.includes(normalizedFlavor) || 
+                   normalizedFlavor.includes(normalizedItemName);
+          });
+        }
+        
+        if (matchedFlavor) {
+          flavor = matchedFlavor;
+        } else {
+          // Fallback: use the normalized name as-is
+          flavor = normalizeFlavorName(itemName);
+        }
       }
 
       items.push({
@@ -62,33 +122,91 @@ function parseOrderItems(itemsString: string): OrderItem[] {
         flavor,
         beverage,
         qty: quantity,
-        deliveredQty: 0 // External orders start as not delivered
-      });
-    } else {
-      // If pattern doesn't match, treat as skewer with qty 1
-      items.push({
-        id: `external-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        type: 'skewer',
-        flavor: trimmedLine,
-        qty: 1,
         deliveredQty: 0
       });
+    } else {
+      // If "Flavor x Qty" pattern doesn't match, try to find known flavors within the line
+      let remainingLine = trimmedLine;
+      let foundAnyFlavor = false;
+
+      for (const knownFlavor of availableFlavors) {
+        const normalizedKnownFlavor = normalizeFlavorName(knownFlavor);
+        const regex = new RegExp(`(${normalizedKnownFlavor})\s*(?:x\s*(\d+))?`, 'gi'); // Match flavor and optional quantity
+        let flavorMatch;
+        while ((flavorMatch = regex.exec(remainingLine)) !== null) {
+          foundAnyFlavor = true;
+          const matchedFlavorName = flavorMatch[1];
+          const matchedQty = parseInt(flavorMatch[2] || '1', 10);
+
+          items.push({
+            id: `external-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            type: 'skewer',
+            flavor: normalizeFlavorName(matchedFlavorName),
+            beverage: undefined,
+            qty: matchedQty,
+            deliveredQty: 0
+          });
+          // Remove the matched part from remainingLine to avoid re-matching
+          remainingLine = remainingLine.replace(flavorMatch[0], '').trim();
+          regex.lastIndex = 0; // Reset regex lastIndex for next iteration
+        }
+      }
+
+      // Fallback for beverages if no skewer flavors were found in this complex line
+      if (!foundAnyFlavor) {
+        const lowerTrimmedLine = trimmedLine.toLowerCase();
+        if (lowerTrimmedLine.includes('coca') || lowerTrimmedLine.includes('guaraná') || 
+            lowerTrimmedLine.includes('água') || lowerTrimmedLine.includes('suco') ||
+            lowerTrimmedLine.includes('bebida') || lowerTrimmedLine.includes('refrigerante')) {
+          items.push({
+            id: `external-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            type: 'beverage',
+            flavor: undefined,
+            beverage: normalizeFlavorName(trimmedLine),
+            qty: 1,
+            deliveredQty: 0
+          });
+        } else {
+          // If still no match, treat the whole line as a single skewer item with qty 1
+          items.push({
+            id: `external-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            type: 'skewer',
+            flavor: normalizeFlavorName(trimmedLine),
+            qty: 1,
+            deliveredQty: 0
+          });
+        }
+      }
     }
   }
-
   return items;
 }
 
-// Function to map external status to internal status
-function mapOrderStatus(externalStatus: string): 'em_preparo' | 'entregue' {
+// Function to map external status to internal Kanban status
+function mapOrderStatus(externalStatus: any): 'todo' | 'in_progress' | 'done' | 'canceled' {
+  if (typeof externalStatus !== 'string') {
+    console.warn('Invalid external status received, expected string but got:', externalStatus);
+    return 'in_progress';
+  }
   const lowerStatus = externalStatus.toLowerCase().trim();
   
-  if (lowerStatus.includes('entregue') || lowerStatus.includes('finalizado') || 
-      lowerStatus.includes('concluído') || lowerStatus.includes('pronto')) {
-    return 'entregue';
+  // Map to Kanban statuses
+  if (lowerStatus.includes('todo') || lowerStatus.includes('a fazer') || lowerStatus.includes('pendente')) {
+    return 'todo';
   }
   
-  return 'em_preparo'; // default to preparing
+  if (lowerStatus.includes('entregue') || lowerStatus.includes('finalizado') || 
+      lowerStatus.includes('concluído') || lowerStatus.includes('pronto') || lowerStatus.includes('done')) {
+    return 'done';
+  }
+  
+  if (lowerStatus.includes('cancelado') || lowerStatus.includes('canceled') || 
+      lowerStatus.includes('cancelar') || lowerStatus.includes('rejeitado')) {
+    return 'canceled';
+  }
+  
+  // Default to in_progress for "Em preparo" and other preparing statuses
+  return 'in_progress';
 }
 
 interface ExternalInventoryItem {
@@ -244,11 +362,11 @@ export async function fetchExternalProducts(): Promise<{ flavors: SkewerFlavor[]
       .filter(b => b && typeof b === 'string') as Beverage[];
 
     const result = {
-      flavors: flavors.length > 0 ? flavors : ['Carne', 'Frango', 'Queijo', 'Calabresa'], // fallback
-      beverages: beverages.length > 0 ? beverages : ['Coca-Cola', 'Guaraná', 'Água', 'Suco'] // fallback
-    };
+        flavors: flavors.length > 0 ? flavors : ['carne', 'frango', 'queijo', 'calabresa'].map(f => normalizeFlavorName(f)), // Fallback normalized
+        beverages: beverages.length > 0 ? beverages : ['coca-cola', 'guaraná', 'água', 'suco'].map(b => normalizeFlavorName(b)) // Fallback normalized
+      };
 
-    return result;
+      return result;
 
   } catch (error) {
     console.error('Error fetching external products:', error);
@@ -325,8 +443,8 @@ async function deriveProductsFromInventory(): Promise<{ flavors: SkewerFlavor[];
       }
     }
 
-    const flavors = Array.from(flavorsSet);
-    const beverages: Beverage[] = ['Coca-Cola', 'Guaraná', 'Água', 'Suco']; // Default beverages
+    const flavors = Array.from(flavorsSet).map(f => normalizeFlavorName(f)); // Normalize here
+    const beverages: Beverage[] = ['coca-cola', 'guaraná', 'água', 'suco'].map(b => normalizeFlavorName(b)); // Normalize here
 
     return { flavors, beverages };
 
@@ -345,6 +463,17 @@ export async function fetchExternalOrders(): Promise<Order[] | null> {
   }
 
   try {
+    // Fetch products data first to get available flavors
+    const productsData = await fetchExternalProducts();
+    let availableFlavors: SkewerFlavor[] = [];
+    if (productsData) {
+      availableFlavors = productsData.flavors;
+    } else {
+      console.warn('Could not fetch products data for parsing external orders. Using fallback flavors.');
+      // Fallback to default flavors if productsData cannot be fetched
+      availableFlavors = ['Carne', 'Frango', 'Queijo', 'Calabresa'];
+    }
+
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'User-Agent': 'JN-Burger-Backoffice/1.0.0',
@@ -379,7 +508,6 @@ export async function fetchExternalOrders(): Promise<Order[] | null> {
       return null;
     }
     
-    // Process each order from external API
     const orders: Order[] = [];
     
     for (const externalOrder of data) {
@@ -388,7 +516,8 @@ export async function fetchExternalOrders(): Promise<Order[] | null> {
         continue;
       }
 
-      const parsedItems = parseOrderItems(externalOrder.Itens);
+      // Pass availableFlavors to parseOrderItems
+      const parsedItems = parseOrderItems(externalOrder.Itens, availableFlavors); 
       if (parsedItems.length === 0) {
         console.warn('No valid items found in external order:', externalOrder);
         continue;
@@ -431,3 +560,237 @@ export function isExternalDataConfigured(): {
     hasApiKey: !!API_KEY
   };
 }
+
+/**
+ * Sends inventory updates to external system
+ */
+export async function sendInventoryUpdate(updates: Partial<Record<SkewerFlavor, number>>): Promise<boolean> {
+  if (!EXTERNAL_INVENTORY_URL) {
+    console.warn('EXTERNAL_INVENTORY_URL is not configured. Inventory updates will not be sent to external API.');
+    return false;
+  }
+
+  try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'User-Agent': 'JN-Burger-Backoffice/1.0.0',
+    };
+
+    if (API_KEY) {
+      headers['Authorization'] = `Bearer ${API_KEY}`;
+    }
+
+    const response = await fetch(EXTERNAL_INVENTORY_URL, {
+      method: 'PATCH', // Assuming PATCH for partial updates
+      headers,
+      body: JSON.stringify({ updates }),
+    });
+
+    if (!response.ok) {
+      console.error(`Failed to send inventory update to external API: ${response.status} ${response.statusText}`);
+      return false;
+    }
+
+    console.log('Inventory update sent to external API successfully.');
+    return true;
+
+  } catch (error) {
+    console.error('Error sending inventory update to external API:', error);
+    return false;
+  }
+}
+
+/**
+ * Sends a new order to external system
+ */
+export async function sendCreateOrder(order: Order): Promise<boolean> {
+  if (!EXTERNAL_ORDERS_URL) {
+    console.warn('EXTERNAL_ORDERS_URL is not configured. New orders will not be sent to external API.');
+    return false;
+  }
+
+  try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'User-Agent': 'JN-Burger-Backoffice/1.0.0',
+    };
+
+    if (API_KEY) {
+      headers['Authorization'] = `Bearer ${API_KEY}`;
+    }
+
+    const response = await fetch(EXTERNAL_ORDERS_URL, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(order),
+    });
+
+    if (!response.ok) {
+      console.error(`Failed to send new order to external API: ${response.status} ${response.statusText}`);
+      return false;
+    }
+
+    console.log('New order sent to external API successfully.');
+    return true;
+
+  } catch (error) {
+    console.error('Error sending new order to external API:', error);
+    return false;
+  }
+}
+
+/**
+ * Sends an updated order to external system
+ */
+export async function sendUpdateOrder(orderId: string, updates: Partial<Order>): Promise<boolean> {
+  if (!EXTERNAL_ORDERS_URL) {
+    console.warn('EXTERNAL_ORDERS_URL is not configured. Order updates will not be sent to external API.');
+    return false;
+  }
+
+  try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'User-Agent': 'JN-Burger-Backoffice/1.0.0',
+    };
+
+    if (API_KEY) {
+      headers['Authorization'] = `Bearer ${API_KEY}`;
+    }
+
+    const response = await fetch(`${EXTERNAL_ORDERS_URL}/${orderId}`, {
+      method: 'PUT', // Assuming PUT for full replacement or PATCH for partial
+      headers,
+      body: JSON.stringify(updates),
+    });
+
+    if (!response.ok) {
+      console.error(`Failed to send order update to external API: ${response.status} ${response.statusText}`);
+      return false;
+    }
+
+    console.log(`Order ${orderId} updated on external API successfully.`);
+    return true;
+
+  } catch (error) {
+    console.error('Error sending order update to external API:', error);
+    return false;
+  }
+}
+
+/**
+ * Sends a delete order request to external system
+ */
+export async function sendDeleteOrder(orderId: string): Promise<boolean> {
+  if (!EXTERNAL_ORDERS_URL) {
+    console.warn('EXTERNAL_ORDERS_URL is not configured. Order deletions will not be sent to external API.');
+    return false;
+  }
+
+  try {
+    const headers: Record<string, string> = {
+      'User-Agent': 'JN-Burger-Backoffice/1.0.0',
+    };
+
+    if (API_KEY) {
+      headers['Authorization'] = `Bearer ${API_KEY}`;
+    }
+
+    const response = await fetch(`${EXTERNAL_ORDERS_URL}/${orderId}`, {
+      method: 'DELETE',
+      headers,
+    });
+
+    if (!response.ok) {
+      console.error(`Failed to send order deletion to external API: ${response.status} ${response.statusText}`);
+      return false;
+    }
+
+    console.log(`Order ${orderId} deleted on external API successfully.`);
+    return true;
+
+  } catch (error) {
+    console.error('Error sending order deletion to external API:', error);
+    return false;
+  }
+}
+
+/**
+ * Sends an updated order item to external system
+ */
+export async function sendUpdateOrderItem(orderId: string, itemId: string, updates: Partial<OrderItem>): Promise<boolean> {
+  if (!EXTERNAL_ORDERS_URL) {
+    console.warn('EXTERNAL_ORDERS_URL is not configured. Order item updates will not be sent to external API.');
+    return false;
+  }
+
+  try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'User-Agent': 'JN-Burger-Backoffice/1.0.0',
+    };
+
+    if (API_KEY) {
+      headers['Authorization'] = `Bearer ${API_KEY}`;
+    }
+
+    // Assuming a specific endpoint for item updates, or a PATCH to the order with item details
+    // For simplicity, let's assume a PATCH to the order endpoint with the item ID in the body or URL
+    // A more robust API would have a dedicated endpoint like /orders/{orderId}/items/{itemId}
+    const response = await fetch(`${EXTERNAL_ORDERS_URL}/${orderId}/items/${itemId}`, {
+      method: 'PATCH', // Assuming PATCH for partial item updates
+      headers,
+      body: JSON.stringify(updates),
+    });
+
+    if (!response.ok) {
+      console.error(`Failed to send order item update to external API: ${response.status} ${response.statusText}`);
+      return false;
+    }
+
+    console.log(`Order item ${itemId} for order ${orderId} updated on external API successfully.`);
+    return true;
+
+  } catch (error) {
+    console.error('Error sending order item update to external API:', error);
+    return false;
+  }
+}
+
+/**
+ * Sends a delete order item request to external system
+ */
+export async function sendDeleteOrderItem(orderId: string, itemId: string): Promise<boolean> {
+  if (!EXTERNAL_ORDERS_URL) {
+    console.warn('EXTERNAL_ORDERS_URL is not configured. Order item deletions will not be sent to external API.');
+    return false;
+  }
+
+  try {
+    const headers: Record<string, string> = {
+      'User-Agent': 'JN-Burger-Backoffice/1.0.0',
+    };
+
+    if (API_KEY) {
+      headers['Authorization'] = `Bearer ${API_KEY}`;
+    }
+
+    const response = await fetch(`${EXTERNAL_ORDERS_URL}/${orderId}/items/${itemId}`, {
+      method: 'DELETE',
+      headers,
+    });
+
+    if (!response.ok) {
+      console.error(`Failed to send order item deletion to external API: ${response.status} ${response.statusText}`);
+      return false;
+    }
+
+    console.log(`Order item ${itemId} for order ${orderId} deleted on external API successfully.`);
+    return true;
+
+  } catch (error) {
+    console.error('Error sending order item deletion to external API:', error);
+    return false;
+  }
+}
+
