@@ -148,7 +148,12 @@ export async function fetchExternalInventory(): Promise<InventoryItem[] | null> 
       return null;
     }
 
-    const data: ExternalInventoryResponse = await response.json();
+    const text = await response.text();
+    if (!text.trim()) {
+      console.log('External inventory API returned empty response');
+      return [];
+    }
+    const data: ExternalInventoryResponse = JSON.parse(text);
     
     if (!Array.isArray(data)) {
       console.error('External inventory API returned unexpected format:', data);
@@ -223,7 +228,12 @@ export async function fetchExternalProducts(): Promise<{ flavors: SkewerFlavor[]
       return null;
     }
 
-    const data: ExternalProductsResponse = await response.json();
+    const text = await response.text();
+    if (!text.trim()) {
+      console.log('External products API returned empty response');
+      return null;
+    }
+    const data: ExternalProductsResponse = JSON.parse(text);
     
     // Use products as-is from external API, with minimal validation
     const flavors = data.skewerFlavors
@@ -295,7 +305,12 @@ async function deriveProductsFromInventory(): Promise<{ flavors: SkewerFlavor[];
       return null;
     }
 
-    const data: ExternalInventoryResponse = await response.json();
+    const text = await response.text();
+    if (!text.trim()) {
+      console.log('External inventory API returned empty response (products derivation)');
+      return null;
+    }
+    const data: ExternalInventoryResponse = JSON.parse(text);
     
     if (!Array.isArray(data)) {
       return null;
@@ -352,7 +367,12 @@ export async function fetchExternalOrders(): Promise<Order[] | null> {
       return null;
     }
 
-    const data: ExternalOrdersResponse = await response.json();
+    const text = await response.text();
+    if (!text.trim()) {
+      console.log('External orders API returned empty response');
+      return [];
+    }
+    const data: ExternalOrdersResponse = JSON.parse(text);
     
     if (!Array.isArray(data)) {
       console.error('External orders API returned unexpected format:', data);

@@ -9,11 +9,12 @@ export async function GET() {
     
     if (externalProducts) {
       // If we have external products, return them with sync info
+      const lastSync = getLastSyncTime();
       return NextResponse.json({
         flavors: externalProducts.flavors,
         beverages: externalProducts.beverages,
-        lastSync: getLastSyncTime(),
-        lastSyncFormatted: getLastSyncTime()?.toISOString(),
+        lastSync,
+        lastSyncFormatted: lastSync?.toISOString(),
         dataSource: 'external'
       }, {
         headers: {

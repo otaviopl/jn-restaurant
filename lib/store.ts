@@ -86,7 +86,21 @@ const db = {
 };
 
 export function getLastSyncTime(): Date | undefined {
-  return memoryCache?.lastSync;
+  const lastSync = memoryCache?.lastSync;
+  if (!lastSync) return undefined;
+  
+  // Ensure it's a Date object
+  if (lastSync instanceof Date) {
+    return lastSync;
+  }
+  
+  // If it's a string, try to parse it
+  if (typeof lastSync === 'string') {
+    const parsed = new Date(lastSync);
+    return isNaN(parsed.getTime()) ? undefined : parsed;
+  }
+  
+  return undefined;
 }
 
 export function getAvailableFlavors(): SkewerFlavor[] {
