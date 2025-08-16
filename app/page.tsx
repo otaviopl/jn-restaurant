@@ -24,10 +24,12 @@ import {
 import { Icon } from '@iconify/react';
 import { Order, OrderItem, SkewerFlavor, Beverage, InventoryItem } from '@/lib/store';
 import KanbanBoard, { KanbanColumnId } from '@/components/KanbanBoard';
+import MobileOrderList from '@/components/MobileOrderList';
 import InventoryPanel from '@/components/InventoryPanel';
 import UpdateInventoryModal from '@/components/UpdateInventoryModal';
 import OrderModal from '@/components/modals/OrderModal'; // New import
 import DeleteConfirmModal from '@/components/modals/DeleteConfirmModal'; // New import
+import Header from '@/components/layout/Header';
 
 export default function HomePage() {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -98,7 +100,6 @@ export default function HomePage() {
   };
 
   const handleOrderDrop = async (orderId: string, newStatus: KanbanColumnId) => {
-    
     const originalOrders = [...orders]; // Save current state for rollback
 
     // Optimistic update
@@ -229,43 +230,127 @@ export default function HomePage() {
     );
   }
 
+  const totalOrders = orders.length;
+  const pendingOrders = orders.filter(order => order.status === 'todo' || order.status === 'in_progress').length;
+
   return (
-    <div className="container-fluid py-4">
-      <Row className="mb-4">
-        <Col>
-          <h1>Painel de Pedidos</h1>
-        </Col>
-      </Row>
-
-      {success && <Alert color="success" fade timeout={150}>{success}</Alert>}
-      {error && <Alert color="danger" fade timeout={150}>{error}</Alert>}
-
-      <Row className="mb-4">
-        <Col lg="8">
-          <InventoryPanel
-            inventory={inventory}
-            onOpenUpdateModal={openUpdateInventoryModal}
-            onRefreshData={forceRefreshData}
-            lastSync={lastSync}
-            dataSource={dataSource}
-            loading={loading}
-          />
-        </Col>
-        <Col lg="4" className="d-flex align-items-end justify-content-end">
-          <Button color="primary" onClick={openCreateOrderModal}>
-            <Icon icon="mdi:plus" className="me-2" />
-            Novo Pedido
-          </Button>
-        </Col>
-      </Row>
-
-      <KanbanBoard
-        orders={orders}
-        onOrderDrop={handleOrderDrop}
-        onOpenEditOrderModal={openEditOrderModal}
-        onOpenDeleteConfirmModal={openDeleteConfirmModal}
+    <div className="min-vh-100" style={{ backgroundColor: '#f4f5f9' }}>
+      <Header 
+        totalOrders={totalOrders}
+        pendingOrders={pendingOrders}
+        onRefreshData={forceRefreshData}
+        loading={loading}
+        onOpenCreateOrderModal={() => setOrderModalOpen(true)}
       />
+      
+      <div className="container-fluid" style={{ padding: '20px 24px' }}>
+        {success && (
+          <Alert 
+            color="success" 
+            fade 
+            timeout={150}
+            className="mb-4"
+            style={{
+              borderRadius: '12px',
+              border: 'none',
+              boxShadow: '0 2px 8px rgba(76, 175, 80, 0.15)'
+            }}
+          >
+            <Icon icon="mdi:check-circle" className="me-2" />
+            {success}
+          </Alert>
+        )}
+        {error && (
+          <Alert 
+            color="danger" 
+            fade 
+            timeout={150}
+            className="mb-4"
+            style={{
+              borderRadius: '12px',
+              border: 'none',
+              boxShadow: '0 2px 8px rgba(244, 67, 54, 0.15)'
+            }}
+          >
+            <Icon icon="mdi:alert-circle" className="me-2" />
+            {error}
+          </Alert>
+        )}
 
+        <Row className="mb-4">
+          <Col lg="12">
+            <InventoryPanel
+              inventory={inventory}
+              onOpenUpdateModal={openUpdateInventoryModal}
+              onRefreshData={forceRefreshData}
+              lastSync={lastSync}
+              dataSource={dataSource}
+              loading={loading}
+            />
+          </Col>
+        </Row>
+
+        {/* Kanban Board Section */}
+        <div 
+          className="mt-5"
+          style={{
+            background: 'white',
+            borderRadius: '16px',
+            padding: '24px',
+            boxShadow: '0 4px 20px rgba(0, 0, 0, 0.08)',
+            border: 'none'
+          }}
+        >
+          <div className="d-flex justify-content-between align-items-center mb-4">
+            <div>
+              <h4 className="mb-1 fw-bold" style={{ color: '#2c3e50' }}>
+                📋 Gestão de Pedidos
+              </h4>
+              <p className="text-muted mb-0">
+                Arraste e solte os pedidos entre as colunas para atualizar o status
+              </p>
+            </div>
+            <div className="d-flex gap-2">
+              <Badge 
+                style={{
+                  backgroundColor: '#ff9800',
+                  color: '#ffffff',
+                  borderRadius: '8px',
+                  padding: '8px 16px',
+                  fontWeight: '600',
+                  border: 'none',
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+                }}
+              >
+                <Icon icon="mdi:drag" className="me-1" width="16" />
+                Arraste & Solte
+              </Badge>
+            </div>
+          </div>
+
+          {/* Desktop Kanban Board */}
+          <div className="d-none d-md-block">
+            <KanbanBoard
+              orders={orders}
+              onOrderDrop={handleOrderDrop}
+              onOpenEditOrderModal={openEditOrderModal}
+              onOpenDeleteConfirmModal={openDeleteConfirmModal}
+            />
+          </div>
+
+          {/* Mobile Order List */}
+          <div className="d-block d-md-none">
+            <MobileOrderList
+              orders={orders}
+              onStatusChange={handleOrderDrop}
+              onOpenEditOrderModal={openEditOrderModal}
+              onOpenDeleteConfirmModal={openDeleteConfirmModal}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Modals */}
       <OrderModal
         isOpen={orderModalOpen}
         toggle={() => setOrderModalOpen(false)} // Changed to directly close the modal

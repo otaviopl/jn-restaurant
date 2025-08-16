@@ -49,14 +49,13 @@ const DroppableColumn: React.FC<{
   });
 
   return (
-    <Col key={column.id} lg={3} md={6} sm={12} className="kanban-column-wrapper">
-      <Card className="kanban-column h-100">
+    <Col key={column.id} lg={3} md={6} sm={12} className="kanban-column mb-4">
+      <Card className="h-100">
         <CardHeader className="d-flex align-items-center">
           <Icon icon={column.icon} className="me-2" />
           {column.title}
         </CardHeader>
         <div ref={setNodeRef} className="kanban-column-body">
-          <CardBody>
           <SortableContext items={orders.map(order => order.id)} strategy={verticalListSortingStrategy}>
             {orders.map((order) => (
               <KanbanCard
@@ -67,7 +66,6 @@ const DroppableColumn: React.FC<{
               />
             ))}
           </SortableContext>
-          </CardBody>
         </div>
       </Card>
     </Col>
@@ -101,20 +99,48 @@ const KanbanBoard: React.FC<KanbanBoardProps> = ({ orders, onOrderDrop, onOpenEd
   };
 
   const handleDragEnd = (event: any) => {
-    const { active, over } = event;
+    const { active, over, delta } = event;
+    
+    // Reset active state
+    setActiveId(null);
 
-    if (!over) return;
+    if (!over) {
+      return;
+    }
 
     const draggedOrderId = active.id as string;
-    const newStatus = over.id as KanbanColumnId;
+    const overId = over.id as string;
+
+    // Check if there was actual movement (not just a click)
+    const deltaX = Math.abs(delta?.x || 0);
+    const deltaY = Math.abs(delta?.y || 0);
+    const totalMovement = deltaX + deltaY;
+    
+    // If movement is too small (< 5px), consider it a click, not a drag
+    if (totalMovement < 5) {
+      return;
+    }
+
+    // Check if the over target is a valid column (not the same order being dragged)
+    const validColumnIds = ['todo', 'in_progress', 'done', 'canceled'];
+    
+    if (!validColumnIds.includes(overId)) {
+      return;
+    }
+
+    // If we're dropping on the same order (just clicking), don't do anything
+    if (draggedOrderId === overId) {
+      return;
+    }
+
+    const newStatus = overId as KanbanColumnId;
 
     // Only update if the status has actually changed
     const currentOrder = orders.find(order => order.id === draggedOrderId);
+    
     if (currentOrder && currentOrder.status !== newStatus) {
       onOrderDrop(draggedOrderId, newStatus);
     }
-
-    setActiveId(null);
   };
 
   const getActiveOrder = () => {
@@ -129,7 +155,7 @@ const KanbanBoard: React.FC<KanbanBoardProps> = ({ orders, onOrderDrop, onOpenEd
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
     >
-      <Row className="kanban-board">
+      <Row className="kanban-board kanban-columns-container">
         {columns.map((column) => (
           <DroppableColumn
             key={column.id}

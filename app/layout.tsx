@@ -2,8 +2,6 @@ import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import './globals.css';
-import { Navbar, NavbarBrand, Nav, NavItem, Container } from 'reactstrap';
-import Link from 'next/link';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -20,29 +18,7 @@ export default function RootLayout({
   return (
     <html lang="pt-BR">
       <body className={inter.className}>
-        <Navbar color="dark" dark expand="md" className="mb-4">
-          <Container>
-            <NavbarBrand href="/" className="fw-bold fs-4">
-              🍔 JN Burger
-            </NavbarBrand>
-            <Nav className="ms-auto" navbar>
-              <NavItem>
-                <Link href="/" className="nav-link text-white">
-                  Pedidos
-                </Link>
-              </NavItem>
-              <NavItem>
-                <Link href="/inventory" className="nav-link text-white">
-                  Estoque
-                </Link>
-              </NavItem>
-            </Nav>
-          </Container>
-        </Navbar>
-        
-        <Container fluid className="px-4">
-          {children}
-        </Container>
+        {children}
       </body>
     </html>
   );

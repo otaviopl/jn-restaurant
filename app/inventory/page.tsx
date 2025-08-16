@@ -19,6 +19,7 @@ import {
 } from 'reactstrap';
 import { Icon } from '@iconify/react';
 import { InventoryItem, SkewerFlavor } from '@/lib/store';
+import Header from '@/components/layout/Header';
 
 export default function InventoryPage() {
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
@@ -153,8 +154,17 @@ export default function InventoryPage() {
   }
 
   return (
-    <Row>
-      <Col lg={8} className="mx-auto">
+    <div className="min-vh-100" style={{ backgroundColor: '#f4f5f9' }}>
+      <Header 
+        totalOrders={0}
+        pendingOrders={0}
+        onRefreshData={() => window.location.reload()}
+        loading={loading}
+      />
+      
+      <div className="container-fluid" style={{ padding: '20px 24px' }}>
+        <Row>
+          <Col lg={8} className="mx-auto">
         {/* Summary Cards */}
         <Row className="mb-4">
           <Col md={3}>
@@ -421,7 +431,9 @@ export default function InventoryPage() {
             </Row>
           </CardBody>
         </Card>
-      </Col>
-    </Row>
+          </Col>
+        </Row>
+      </div>
+    </div>
   );
 }
